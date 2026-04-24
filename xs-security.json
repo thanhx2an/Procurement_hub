@@ -1,0 +1,41 @@
+{
+  "xsappname": "poc2-procurement-hub",
+  "tenant-mode": "dedicated",
+  "scopes": [
+    { "name": "$XSAPPNAME.VendorUser",       "description": "Vendor can manage own shipments" },
+    { "name": "$XSAPPNAME.VendorAdmin",       "description": "Vendor admin can manage contacts" },
+    { "name": "$XSAPPNAME.ProcurementManager","description": "Full access to all vendors" },
+    { "name": "$XSAPPNAME.Auditor",           "description": "Read-only access to audit logs" }
+  ],
+  "attributes": [
+    {
+      "name": "VendorID",
+      "description": "Restricts vendor user to their own vendor data",
+      "valueType": "string"
+    }
+  ],
+  "role-templates": [
+    {
+      "name": "VendorUser",
+      "description": "External vendor managing own shipments",
+      "scope-references": [ "$XSAPPNAME.VendorUser" ],
+      "attribute-references": [ "VendorID" ]
+    },
+    {
+      "name": "VendorAdmin",
+      "description": "Vendor administrator",
+      "scope-references": [ "$XSAPPNAME.VendorAdmin" ],
+      "attribute-references": [ "VendorID" ]
+    },
+    {
+      "name": "ProcurementManager",
+      "description": "Internal procurement manager",
+      "scope-references": [ "$XSAPPNAME.ProcurementManager" ]
+    },
+    {
+      "name": "Auditor",
+      "description": "Compliance auditor",
+      "scope-references": [ "$XSAPPNAME.Auditor" ]
+    }
+  ]
+}
