@@ -172,6 +172,10 @@ module.exports = cds.service.impl(async function () {
             newValue   : JSON.stringify(req.data)
         });
     });
+    this.before('*', (req) => {
+  console.log('User:', req.user.id, req.user.roles)
+})
+
 
     // ─── CRITICAL DELAY ACTION ───
     this.on('criticalDelay', async (req) => {

@@ -23,8 +23,12 @@ entity Shipments : cuid, managed {
     deliveryDate : DateTime;
     totalWeight  : Decimal(13,3);
     items        : Composition of many ShipmentItems on items.parent = $self;
-    @Core.MediaType: 'application/pdf'
-    invoiceScan  : LargeBinary;
+    
+    @Core.MediaType  : invoiceScan_mediaType
+    invoiceScan      : LargeBinary;
+    
+    @Core.IsMediaType: true
+    invoiceScan_mediaType : String;
 }
 
 entity ShipmentItems : cuid {
