@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "A simple CAP project.",
   "dependencies": {
+    "@cap-js/hana": "^2.7.1",
     "@sap-cloud-sdk/connectivity": "^4",
     "@sap-cloud-sdk/http-client": "^4",
     "@sap-cloud-sdk/resilience": "^4",
@@ -94,6 +95,24 @@
     },
     "fiori": {
       "bypass_draft": true
+    },
+    "build": {
+      "target": "gen",
+      "tasks": [
+        {
+          "for": "hana",
+          "src": "db",
+          "options": {
+            "model": [
+              "db"
+            ]
+          }
+        },
+        {
+          "for": "nodejs",
+          "src": "srv"
+        }
+      ]
     }
   }
 }

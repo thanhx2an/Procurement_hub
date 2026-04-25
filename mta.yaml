@@ -1,0 +1,125 @@
+_schema-version: "3.1"
+ID: poc2-procurement-hub
+version: 1.0.0
+description: Multi-Vendor Collaborative Procurement & Logistics Hub
+
+modules:
+  # ─── CAP Backend ───
+  - name: poc2-procurement-hub-srv
+    type: nodejs
+    path: gen/srv
+    parameters:
+      buildpack: nodejs_buildpack
+      disk-quota: 1024M
+      memory: 512M
+    build-parameters:
+      builder: npm
+    provides:
+      - name: srv-api
+        properties:
+          srv-url: ${default-url}
+    requires:
+      - name: poc2-auth
+      - name: poc2-db
+      - name: poc2-destination
+      - name: vendor-portal-api
+        group: destinations
+        properties:
+          name: vendor-portal
+          url: ~{url}
+          forwardAuthToken: false
+      - name: poc2-connectivity
+
+  # ─── HANA DB Deployer ───
+  - name: poc2-procurement-hub-db-deployer
+    type: hdb
+    path: gen/db
+    parameters:
+      buildpack: nodejs_buildpack
+    requires:
+      - name: poc2-db
+
+  # ─── React Frontend ───
+  - name: poc2-vendor-portal
+    type: nodejs
+    path: app/vendor-portal
+    provides:
+      - name: vendor-portal-api
+        properties:
+          url: ${default-url}
+    build-parameters:
+      build-result: dist
+      builder: custom
+      commands:
+        - npm install
+        - npm run build
+    parameters:
+      buildpack: staticfile_buildpack
+      disk-quota: 512M
+      memory: 128M
+    requires:
+      - name: poc2-auth
+      - name: srv-api
+        group: destinations
+        properties:
+          name: srv-api
+          url: ~{srv-url}
+          forwardAuthToken: true
+
+  # AppRouter
+  - name: poc2-approuter
+    type: approuter.nodejs
+    path: approuter
+    parameters:
+      disk-quota: 256M
+      memory: 256M
+    properties:
+      TENANT_HOST_PATTERN: "^(.*)-dev-poc2-approuter.cfapps.us10-001.hana.ondemand.com"
+      UAA_SERVICE_NAME: poc2-auth
+    requires:
+      - name: poc2-auth
+      - name: srv-api
+        group: destinations
+        properties:
+          name: srv-api
+          url: ~{srv-url}
+          forwardAuthToken: true
+
+      - name: vendor-portal-api
+        group: destinations
+        properties:
+          name: vendor-portal
+          url: ~{url}
+          forwardAuthToken: false
+          
+      - name: poc2-destination
+
+resources:
+  # ─── XSUAA (đã tồn tại) ───
+  - name: poc2-auth
+    type: org.cloudfoundry.existing-service
+
+  # ─── HANA Cloud ───
+  - name: poc2-db
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: hana
+      service-plan: hdi-shared
+      service-name: poc2-db
+
+  # ─── Destination Service ───
+  - name: poc2-destination
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: destination
+      service-plan: lite
+      service-name: poc2-destination
+
+  # ─── Connectivity ───
+  - name: poc2-connectivity
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: connectivity
+      service-plan: lite
+      service-name: poc2-connectivity
+
