@@ -51,7 +51,7 @@ export default function PriceLedger() {
                       name={entry.product_ID || 'Unknown Product'}>
                       <div style={{ padding:'0.5rem 0' }}>
                         <div>Product: <strong>{entry.product_ID || '—'}</strong></div>
-                        <div>Vendor: <strong>{entry.vendor_ID || '—'}</strong></div>
+                        <div>Vendor: <strong>{entry.vendorCode || '—'}</strong></div>
                         <div>Negotiated: <strong style={{ color:'var(--sapPositiveColor)' }}>{entry.negotiatedPrice}</strong></div>
                         {entry.basePrice && (
                           <div>Base: <strong>{entry.basePrice}</strong>
@@ -88,7 +88,7 @@ export default function PriceLedger() {
             <Button design="Emphasized" disabled={createMutation.isPending}
               onClick={() => createMutation.mutate({
                 product_ID: formRef.current.productId,
-                vendor_ID: formRef.current.vendorId,
+                vendorCode: formRef.current.vendorId,
                 negotiatedPrice: parseFloat(formRef.current.price) || 0,
                 basePrice: parseFloat(formRef.current.basePrice) || 0,
                 validFrom: new Date().toISOString(),

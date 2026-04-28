@@ -5,7 +5,6 @@ entity Vendors : cuid, managed {
     name        : String(100);
     taxId       : String(50);
     country     : String(3);
-    shipments   : Association to many Shipments on shipments.vendor = $self;
 }
 
 entity Products : cuid, managed {
@@ -16,13 +15,15 @@ entity Products : cuid, managed {
 }
 
 entity Shipments : cuid, managed {
-    vendor       : Association to Vendors;
-    status       : String enum {
-                     Draft; Pending; Shipped; Delivered; Exception
-                   } default 'Draft';
-    deliveryDate : DateTime;
-    totalWeight  : Decimal(13,3);
-    items        : Composition of many ShipmentItems on items.parent = $self;
+    vendorCode       : String(10);   // S/4HANA BusinessPartner number (source of truth)
+    status           : String enum {
+                         Draft; Pending; Shipped; Delivered; Exception
+                       } default 'Draft';
+    deliveryDate     : DateTime;
+    totalWeight      : Decimal(13,3);
+    purchaseOrderId  : String(10);   // S/4HANA PO reference for PATCH-back
+    delayReason      : String(500);  // Vendor's reason when flagging a delay
+    items            : Composition of many ShipmentItems on items.parent = $self;
     
     @Core.MediaType  : invoiceScan_mediaType
     invoiceScan      : LargeBinary;
@@ -41,7 +42,7 @@ entity ShipmentItems : cuid {
 
 entity PriceLedger : cuid, temporal {
     product         : Association to Products;
-    vendor          : Association to Vendors;
+    vendorCode      : String(10);   // S/4HANA BusinessPartner number
     validFrom       : DateTime;
     validTo         : DateTime;
     negotiatedPrice : Decimal(15,2);

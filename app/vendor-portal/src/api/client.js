@@ -26,6 +26,7 @@ export const fetchShipments = async () => {
 };
 
 export const createShipment = async (payload) => {
+  // vendorCode = S/4HANA BusinessPartner number (source of truth)
   const { data } = await api.post('/Shipments', payload);
   return data;
 };
@@ -46,8 +47,18 @@ export const uploadInvoice = async (id, file) => {
   return data;
 };
 
-export const triggerCriticalDelay = async (shipmentId) => {
-  const { data } = await api.post('/criticalDelay', { shipmentId });
+export const triggerCriticalDelay = async ({ shipmentId, reason }) => {
+  const { data } = await api.post('/criticalDelay', { shipmentId, reason });
+  return data;
+};
+
+export const approveException = async ({ shipmentId, newDeliveryDate }) => {
+  const { data } = await api.post('/approveException', { shipmentId, newDeliveryDate });
+  return data;
+};
+
+export const rejectException = async (shipmentId) => {
+  const { data } = await api.post('/rejectException', { shipmentId });
   return data;
 };
 

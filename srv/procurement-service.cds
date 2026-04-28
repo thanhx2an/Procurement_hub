@@ -5,11 +5,11 @@ using { API_SUPPLIERINVOICE as INV } from './external/API_SUPPLIERINVOICE';
 service ProcurementService @(requires: 'authenticated-user') @(path: '/procurement') {
 
     // ─── Vendors: Manager thấy tất cả, Vendor chỉ thấy của mình ───
+    // Filtering theo VendorID được xử lý trong JS handler (reads live từ S/4HANA)
     @(restrict: [
         { grant: 'READ', to: 'ProcurementManager' },
-        
-        { grant: 'READ', to: 'VendorUser', where: 'BusinessPartner = $user.VendorID' },
-        { grant: 'READ', to: 'VendorAdmin', where: 'BusinessPartner = $user.VendorID' }
+        { grant: 'READ', to: 'VendorUser' },
+        { grant: 'READ', to: 'VendorAdmin' }
     ])
     entity Vendors as projection on db.Vendors;
 
@@ -24,8 +24,8 @@ service ProcurementService @(requires: 'authenticated-user') @(path: '/procureme
     @odata.draft.enabled
     @(restrict: [
         { grant: ['READ', 'WRITE'], to: 'ProcurementManager' },
-        { grant: ['READ', 'WRITE'], to: 'VendorUser',  where: 'vendor_BusinessPartner = $user.VendorID' },
-        { grant: ['READ', 'WRITE'], to: 'VendorAdmin', where: 'vendor_BusinessPartner = $user.VendorID' },
+        { grant: ['READ', 'WRITE'], to: 'VendorUser',  where: 'vendorCode = $user.VendorID' },
+        { grant: ['READ', 'WRITE'], to: 'VendorAdmin', where: 'vendorCode = $user.VendorID' },
         { grant: 'READ',            to: 'Auditor' }
     ])
     entity Shipments as projection on db.Shipments;
@@ -68,7 +68,15 @@ service ProcurementService @(requires: 'authenticated-user') @(path: '/procureme
     ])
     entity SupplierInvoices as projection on INV.A_SupplierInvoice;
 
-    // ─── criticalDelay: chỉ Manager ───
+    // ─── criticalDelay: Vendor báo trễ → email Manager ───
+    @(requires: ['VendorUser', 'VendorAdmin', 'ProcurementManager'])
+    action criticalDelay(shipmentId: UUID, reason: String) returns String;
+
+    // ─── approveException: Manager chấp nhận trễ → PATCH S/4HANA PO ───
     @(requires: 'ProcurementManager')
-    action criticalDelay(shipmentId: UUID) returns String;
+    action approveException(shipmentId: UUID, newDeliveryDate: DateTime) returns String;
+
+    // ─── rejectException: Manager từ chối → revert về Pending ───
+    @(requires: 'ProcurementManager')
+    action rejectException(shipmentId: UUID) returns String;
 }

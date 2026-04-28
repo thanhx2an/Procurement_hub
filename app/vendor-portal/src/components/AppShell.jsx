@@ -41,6 +41,12 @@ export default function AppShell({ children }) {
             data-path="/price-ledger"
             selected={location.pathname === '/price-ledger'}
           />
+          <SideNavigationItem
+            text="Audit Logs"
+            icon="detail-view"
+            data-path="/audit-logs"
+            selected={location.pathname === '/audit-logs'}
+          />
         </SideNavigation>
 
         <main style={{ flex: 1, overflow: 'auto', padding: '1.5rem', background: 'var(--sapBackgroundColor)' }}>

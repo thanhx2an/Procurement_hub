@@ -166,7 +166,7 @@ export default function Dashboard() {
           <AnalyticalTable
             data={shipments}
             columns={[
-              { Header: "Vendor", accessor: "vendor_ID" },
+              { Header: "Vendor", accessor: "vendorCode" },
               {
                 Header: "Delivery Date",
                 accessor: "deliveryDate",

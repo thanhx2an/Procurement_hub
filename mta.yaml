@@ -1,0 +1,115 @@
+_schema-version: "3.1"
+ID: poc2-procurement-hub
+version: 1.0.0
+description: POC 2 – Multi-Vendor Collaborative Procurement & Logistics Hub
+
+# ─────────────────────────────────────────────
+# MODULES
+# ─────────────────────────────────────────────
+modules:
+
+  # ── 1. CAP Backend (Node.js) ──────────────────
+  - name: poc2-procurement-hub-srv
+    type: nodejs
+    path: .
+    parameters:
+      buildpack: nodejs_buildpack
+      memory: 512M
+      disk-quota: 1024M
+    build-parameters:
+      builder: npm
+      ignore:
+        - node_modules/
+        - app/
+        - .git/
+        - default-env.json
+    properties:
+      NODE_ENV: production
+    requires:
+      - name: poc2-xsuaa
+      - name: poc2-hana
+      - name: poc2-destination
+      - name: poc2-connectivity
+      - name: poc2-alert-notification
+    provides:
+      - name: srv-api
+        properties:
+          srv-url: ${default-url}
+
+  # ── 2. React Frontend via SAP Approuter ───────
+  # Approuter handles: XSUAA login, token forwarding, static file serving
+  - name: poc2-procurement-hub-app
+    type: approuter.nodejs
+    path: app/vendor-portal
+    parameters:
+      memory: 256M
+      disk-quota: 512M
+    build-parameters:
+      builder: custom
+      commands:
+        - npm install
+        - npm run build
+      build-result: dist
+    requires:
+      - name: poc2-xsuaa
+      - name: srv-api
+        group: destinations
+        properties:
+          name: srv-api
+          url: ~{srv-url}
+          forwardAuthToken: true
+
+# ─────────────────────────────────────────────
+# RESOURCES (BTP Service Instances)
+# ─────────────────────────────────────────────
+resources:
+
+  # ── XSUAA (Authentication) ───────────────────
+  - name: poc2-xsuaa
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: xsuaa
+      service-plan: application
+      path: ./xs-security.json
+      config:
+        xsappname: poc2-procurement-hub-${org}-${space}
+        tenant-mode: dedicated
+
+  # ── SAP HANA Cloud (Persistence) ─────────────
+  - name: poc2-hana
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: hana
+      service-plan: hdi-shared
+
+  # ── Destination Service (S/4HANA APIs) ────────
+  - name: poc2-destination
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: destination
+      service-plan: lite
+      config:
+        init_data:
+          instance:
+            existing_destinations_policy: update
+            destinations:
+              - Name: S4_API
+                Type: HTTP
+                Authentication: BasicAuthentication
+                ProxyType: Internet
+                URL: https://my405597-api.s4hana.cloud.sap
+                # Set User and Password in BTP Cockpit → Destinations after deployment
+
+  # ── Connectivity Service ──────────────────────
+  - name: poc2-connectivity
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: connectivity
+      service-plan: lite
+
+  # ── Alert Notification (email khi criticalDelay) ──
+  - name: poc2-alert-notification
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: alert-notification
+      service-plan: free

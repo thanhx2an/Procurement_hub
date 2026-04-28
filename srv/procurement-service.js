@@ -1,9 +1,85 @@
 const cds = require('@sap/cds');
 
+// ─── Helper: BTP Alert Notification REST call ─────────────────────────────
+async function sendAlertNotification({ subject, body, shipmentId, severity = 'WARNING' }) {
+    try {
+        const ansCred = cds.env.requires?.['alert-notification']?.credentials;
+        if (!ansCred) {
+            console.log('[AlertNotification] Service not bound — skipping email. Would have sent:', subject);
+            return;
+        }
+
+        // 1. Get OAuth token via client_credentials
+        const tokenRes = await fetch(`${ansCred.oauth_url}/oauth/token`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+                grant_type:    'client_credentials',
+                client_id:     ansCred.client_id,
+                client_secret: ansCred.client_secret,
+            }),
+        });
+        const { access_token } = await tokenRes.json();
+
+        // 2. POST alert event
+        const alertRes = await fetch(`${ansCred.url}/cf/producer/v1/resource-events`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${access_token}`,
+                'Content-Type':  'application/json',
+            },
+            body: JSON.stringify({
+                eventType:      'CRITICALDELAY',
+                eventTimestamp: new Date().toISOString(),
+                severity,
+                category:       'ALERT',
+                subject,
+                body,
+                resource: {
+                    resourceName:     'poc2-procurement-hub',
+                    resourceType:     'Shipment',
+                    resourceInstance: shipmentId,
+                },
+            }),
+        });
+
+        if (!alertRes.ok) {
+            const text = await alertRes.text();
+            console.error('[AlertNotification] API error:', alertRes.status, text);
+        } else {
+            console.log('[AlertNotification] Alert sent:', subject);
+        }
+    } catch (err) {
+        // Never let notification failure break the main business flow
+        console.error('[AlertNotification] Failed to send:', err.message);
+    }
+}
+
+// ─── Helper: PATCH S/4HANA PO delivery date ───────────────────────────────
+async function patchS4DeliveryDate(purchaseOrderId, newDeliveryDate) {
+    try {
+        const S4_PO = await cds.connect.to('API_PURCHASEORDER');
+        await S4_PO.run(
+            UPDATE('PurchaseOrder')
+                .set({ PurchaseOrderDate: newDeliveryDate })
+                .where({ PurchaseOrder: purchaseOrderId })
+        );
+        console.log('[S4 PATCH] PO', purchaseOrderId, 'delivery date updated to', newDeliveryDate);
+    } catch (err) {
+        // Log but don't throw — S/4 patch is best-effort in sandbox/mock mode
+        console.error('[S4 PATCH] Failed:', err.message);
+    }
+}
+
 module.exports = cds.service.impl(async function () {
     const { Shipments, AuditLogs, PriceLedger } = this.entities;
 
-    // ─── Vendors: filter theo role ───
+    // ─── Debug: log every request ─────────────────────────────────────────
+    this.before('*', (req) => {
+        console.log('[Request]', req.method, req.entity, '| User:', req.user?.id, req.user?.roles);
+    });
+
+    // ─── Vendors: live from S/4HANA API_BUSINESS_PARTNER ──────────────────
     this.on('READ', 'Vendors', async (req) => {
         try {
             const S4_BP = await cds.connect.to('API_BUSINESS_PARTNER');
@@ -24,7 +100,7 @@ module.exports = cds.service.impl(async function () {
         }
     });
 
-    // ─── Products từ S/4HANA ───
+    // ─── Products: live from S/4HANA ──────────────────────────────────────
     this.on('READ', 'Products', async (req) => {
         try {
             const S4 = await cds.connect.to('API_PRODUCT');
@@ -40,7 +116,7 @@ module.exports = cds.service.impl(async function () {
         }
     });
 
-    // ─── PurchaseOrders ───
+    // ─── PurchaseOrders: live from S/4HANA ────────────────────────────────
     this.on('READ', 'PurchaseOrders', async (req) => {
         try {
             const S4_PO = await cds.connect.to('API_PURCHASEORDER');
@@ -61,7 +137,7 @@ module.exports = cds.service.impl(async function () {
         }
     });
 
-    // ─── SupplierInvoices ───
+    // ─── SupplierInvoices: live from S/4HANA ──────────────────────────────
     this.on('READ', 'SupplierInvoices', async (req) => {
         try {
             const S4_INV = await cds.connect.to('API_SUPPLIERINVOICE');
@@ -77,25 +153,21 @@ module.exports = cds.service.impl(async function () {
         }
     });
 
-    // ─── MEDIA STREAM: Upload PDF Invoice ───
+    // ─── MEDIA STREAM: Upload PDF Invoice ─────────────────────────────────
     this.on('PUT', 'Shipments', async (req, next) => {
         const contentType = req.headers?.['content-type'] || '';
-        if (!contentType.includes('application/pdf')) {
-            return next();
-        }
+        if (!contentType.includes('application/pdf')) return next();
 
         const shipmentId = req.params?.[0]?.ID || req.params?.[0];
         console.log('[MediaStream] Receiving PDF for shipment:', shipmentId);
 
         try {
-            // CAP truyền binary data qua req.data trực tiếp (không phải async iterator)
             let pdfBuffer;
             if (Buffer.isBuffer(req.data)) {
                 pdfBuffer = req.data;
             } else if (typeof req.data === 'string') {
                 pdfBuffer = Buffer.from(req.data);
             } else if (req.data?.pipe) {
-                // Là stream
                 const chunks = [];
                 await new Promise((resolve, reject) => {
                     req.data.on('data', chunk => chunks.push(chunk));
@@ -109,30 +181,28 @@ module.exports = cds.service.impl(async function () {
 
             console.log('[MediaStream] PDF size:', pdfBuffer.length, 'bytes');
 
-            // Lưu vào DB
             await UPDATE(Shipments)
                 .set({ invoiceScan: pdfBuffer })
                 .where({ ID: shipmentId });
 
-            // Mock AI/OCR
+            // Mock AI/OCR extraction
             await new Promise(resolve => setTimeout(resolve, 50));
             const ocrResult = {
-                trackingNumber : `TRK-${shipmentId?.substring(0, 8).toUpperCase()}`,
-                batchId        : `BATCH-${Date.now()}`,
-                extractedDate  : new Date().toISOString(),
-                confidence     : 0.95,
-                source         : 'mock-ai-ocr'
+                trackingNumber: `TRK-${shipmentId?.substring(0, 8).toUpperCase()}`,
+                batchId:        `BATCH-${Date.now()}`,
+                extractedDate:  new Date().toISOString(),
+                confidence:     0.95,
+                source:         'mock-ai-ocr',
             };
             console.log('[MediaStream] OCR result:', ocrResult);
 
-            // Audit log
             await INSERT.into(AuditLogs).entries({
-                entityName : 'Shipments',
-                entityId   : shipmentId,
-                action     : 'INVOICE_UPLOADED',
-                changedBy  : req.user?.id || 'system',
-                changedAt  : new Date().toISOString(),
-                newValue   : JSON.stringify(ocrResult)
+                entityName: 'Shipments',
+                entityId:   shipmentId,
+                action:     'INVOICE_UPLOADED',
+                changedBy:  req.user?.id || 'system',
+                changedAt:  new Date().toISOString(),
+                newValue:   JSON.stringify(ocrResult),
             });
 
             return ocrResult;
@@ -142,7 +212,7 @@ module.exports = cds.service.impl(async function () {
         }
     });
 
-    // ─── EARLY VALIDATION ───
+    // ─── EARLY VALIDATION: Delivery date không được là quá khứ ───────────
     this.before('SAVE', 'Shipments', async (req) => {
         const { deliveryDate } = req.data;
         if (deliveryDate && new Date(deliveryDate) < new Date()) {
@@ -150,47 +220,131 @@ module.exports = cds.service.impl(async function () {
         }
     });
 
-    // ─── AUDIT LOGGING ───
+    // ─── AUDIT LOG: Sau mỗi lần UPDATE Shipment ───────────────────────────
     this.after('UPDATE', 'Shipments', async (data, req) => {
         await INSERT.into(AuditLogs).entries({
-            entityName : 'Shipments',
-            entityId   : data.ID,
-            action     : 'UPDATE',
-            changedBy  : req.user?.id || 'system',
-            changedAt  : new Date().toISOString(),
-            newValue   : JSON.stringify(data)
+            entityName: 'Shipments',
+            entityId:   data.ID,
+            action:     'UPDATE',
+            changedBy:  req.user?.id || 'system',
+            changedAt:  new Date().toISOString(),
+            newValue:   JSON.stringify(data),
         });
     });
 
+    // ─── AUDIT LOG: Trước mỗi lần tạo PriceLedger entry ──────────────────
     this.before('CREATE', 'PriceLedger', async (req) => {
         await INSERT.into(AuditLogs).entries({
-            entityName : 'PriceLedger',
-            entityId   : req.data.ID,
-            action     : 'PRICE_NEGOTIATION',
-            changedBy  : req.user?.id || 'system',
-            changedAt  : new Date().toISOString(),
-            newValue   : JSON.stringify(req.data)
+            entityName: 'PriceLedger',
+            entityId:   req.data.ID,
+            action:     'PRICE_NEGOTIATION',
+            changedBy:  req.user?.id || 'system',
+            changedAt:  new Date().toISOString(),
+            newValue:   JSON.stringify(req.data),
         });
     });
-    this.before('*', (req) => {
-  console.log('User:', req.user.id, req.user.roles)
-})
 
-
-    // ─── CRITICAL DELAY ACTION ───
+    // ─── ACTION: criticalDelay — Vendor báo giao trễ ─────────────────────
+    // Flow: status → Exception → ghi log → gửi email Manager qua Alert Notification
     this.on('criticalDelay', async (req) => {
-        const { shipmentId } = req.data;
+        const { shipmentId, reason } = req.data;
+
+        // 1. Lấy thông tin shipment
+        const shipment = await SELECT.one.from(Shipments).where({ ID: shipmentId });
+        if (!shipment) return req.error(404, `Shipment ${shipmentId} not found`);
+
+        // 2. Cập nhật status + lý do trễ
         await UPDATE(Shipments)
-            .set({ status: 'Exception' })
+            .set({ status: 'Exception', delayReason: reason || 'No reason provided' })
             .where({ ID: shipmentId });
+
+        // 3. Ghi audit log
         await INSERT.into(AuditLogs).entries({
-            entityName : 'Shipments',
-            entityId   : shipmentId,
-            action     : 'CRITICAL_DELAY_FLAGGED',
-            changedBy  : req.user?.id || 'system',
-            changedAt  : new Date().toISOString(),
-            newValue   : JSON.stringify({ status: 'Exception' })
+            entityName: 'Shipments',
+            entityId:   shipmentId,
+            action:     'CRITICAL_DELAY_FLAGGED',
+            changedBy:  req.user?.id || 'system',
+            changedAt:  new Date().toISOString(),
+            newValue:   JSON.stringify({ status: 'Exception', reason }),
         });
-        return `Shipment ${shipmentId} flagged as critical delay`;
+
+        // 4. Gửi email thông báo Manager qua BTP Alert Notification
+        await sendAlertNotification({
+            shipmentId,
+            subject: `⚠️ Critical Delay: Shipment ${shipmentId.substring(0, 8).toUpperCase()}`,
+            body:    `Vendor ${shipment.vendorCode} (${req.user?.id}) has flagged shipment ${shipmentId} as critically delayed.\n\nReason: ${reason || 'Not provided'}\n\nPlease review and approve or reject this exception in the Procurement Hub.`,
+            severity: 'WARNING',
+        });
+
+        return `Shipment ${shipmentId} flagged as critical delay. Manager has been notified.`;
+    });
+
+    // ─── ACTION: approveException — Manager chấp nhận giao trễ ──────────
+    // Flow: status → Shipped → PATCH S/4HANA PO delivery date → ghi log
+    this.on('approveException', async (req) => {
+        const { shipmentId, newDeliveryDate } = req.data;
+
+        // 1. Lấy thông tin shipment
+        const shipment = await SELECT.one.from(Shipments).where({ ID: shipmentId });
+        if (!shipment) return req.error(404, `Shipment ${shipmentId} not found`);
+        if (shipment.status !== 'Exception') {
+            return req.error(400, `Shipment is not in Exception status (current: ${shipment.status})`);
+        }
+
+        const approvedDate = newDeliveryDate || shipment.deliveryDate;
+
+        // 2. Cập nhật local status
+        await UPDATE(Shipments)
+            .set({ status: 'Shipped', deliveryDate: approvedDate })
+            .where({ ID: shipmentId });
+
+        // 3. PATCH ngược về S/4HANA PO (nếu có purchaseOrderId)
+        if (shipment.purchaseOrderId) {
+            await patchS4DeliveryDate(shipment.purchaseOrderId, approvedDate);
+        } else {
+            console.log('[approveException] No purchaseOrderId on shipment — skipping S/4 PATCH');
+        }
+
+        // 4. Ghi audit log
+        await INSERT.into(AuditLogs).entries({
+            entityName: 'Shipments',
+            entityId:   shipmentId,
+            action:     'EXCEPTION_APPROVED',
+            changedBy:  req.user?.id || 'system',
+            changedAt:  new Date().toISOString(),
+            newValue:   JSON.stringify({ status: 'Shipped', newDeliveryDate: approvedDate }),
+        });
+
+        return `Exception approved. Shipment ${shipmentId} status set to Shipped. New delivery date: ${approvedDate}.`;
+    });
+
+    // ─── ACTION: rejectException — Manager từ chối, vendor phải giữ ngày ─
+    // Flow: status → Pending → ghi log
+    this.on('rejectException', async (req) => {
+        const { shipmentId } = req.data;
+
+        // 1. Lấy thông tin shipment
+        const shipment = await SELECT.one.from(Shipments).where({ ID: shipmentId });
+        if (!shipment) return req.error(404, `Shipment ${shipmentId} not found`);
+        if (shipment.status !== 'Exception') {
+            return req.error(400, `Shipment is not in Exception status (current: ${shipment.status})`);
+        }
+
+        // 2. Revert về Pending
+        await UPDATE(Shipments)
+            .set({ status: 'Pending', delayReason: null })
+            .where({ ID: shipmentId });
+
+        // 3. Ghi audit log
+        await INSERT.into(AuditLogs).entries({
+            entityName: 'Shipments',
+            entityId:   shipmentId,
+            action:     'EXCEPTION_REJECTED',
+            changedBy:  req.user?.id || 'system',
+            changedAt:  new Date().toISOString(),
+            newValue:   JSON.stringify({ status: 'Pending', previousStatus: 'Exception' }),
+        });
+
+        return `Exception rejected. Shipment ${shipmentId} reverted to Pending. Vendor must maintain original delivery date.`;
     });
 });
