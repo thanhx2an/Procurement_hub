@@ -52,6 +52,14 @@ service ProcurementService @(requires: 'authenticated-user') @(path: '/procureme
     ])
     entity AuditLogs as projection on db.AuditLogs;
 
+    // ─── AssetAttachments: PDF metadata (file stored in Supabase Storage) ───
+    @(restrict: [
+        { grant: ['READ', 'WRITE'], to: 'ProcurementManager' },
+        { grant: ['READ', 'WRITE'], to: ['VendorUser', 'VendorAdmin'] },
+        { grant: 'READ',            to: 'Auditor' }
+    ])
+    entity AssetAttachments as projection on db.AssetAttachments;
+
     // ─── PurchaseOrders từ S/4HANA ───
     @readonly
     @(restrict: [

@@ -1,0 +1,139 @@
+<svg viewBox="0 0 900 620" xmlns="http://www.w3.org/2000/svg" font-family="Arial, sans-serif">
+  <title>POC 2 – Multi-Vendor Procurement Hub Architecture</title>
+
+  <rect width="900" height="620" fill="#F8F9FA"/>
+
+  <text x="450" y="32" text-anchor="middle" font-size="15" font-weight="bold" fill="#1E2A3A">POC 2 – Multi-Vendor Collaborative Procurement Hub</text>
+  <text x="450" y="50" text-anchor="middle" font-size="10" fill="#78909C">Architecture Overview · SAP BTP Side-by-Side Extensibility</text>
+
+  <rect x="16" y="66" width="148" height="270" rx="8" fill="#E3F2FD" stroke="#90CAF9" stroke-width="1.5"/>
+  <text x="90" y="84" text-anchor="middle" font-size="9" font-weight="bold" fill="#1565C0">EXTERNAL USERS</text>
+  <rect x="28" y="92" width="124" height="52" rx="6" fill="#1565C0"/>
+  <text x="90" y="111" text-anchor="middle" font-size="9" font-weight="bold" fill="white">Vendor User</text>
+  <text x="90" y="124" text-anchor="middle" font-size="8" fill="#BBDEFB">Manages own shipments</text>
+  <text x="90" y="136" text-anchor="middle" font-size="8" fill="#BBDEFB">via BTP IAS login</text>
+  <rect x="28" y="154" width="124" height="42" rx="6" fill="#1976D2"/>
+  <text x="90" y="170" text-anchor="middle" font-size="9" font-weight="bold" fill="white">Vendor Admin</text>
+  <text x="90" y="184" text-anchor="middle" font-size="8" fill="#BBDEFB">Manages contacts</text>
+
+  <rect x="16" y="348" width="148" height="130" rx="8" fill="#E8F5E9" stroke="#A5D6A7" stroke-width="1.5"/>
+  <text x="90" y="366" text-anchor="middle" font-size="9" font-weight="bold" fill="#2E7D32">INTERNAL USERS</text>
+  <rect x="28" y="374" width="124" height="42" rx="6" fill="#2E7D32"/>
+  <text x="90" y="390" text-anchor="middle" font-size="9" font-weight="bold" fill="white">Procurement Mgr</text>
+  <text x="90" y="404" text-anchor="middle" font-size="8" fill="#C8E6C9">Approve exceptions</text>
+  <rect x="28" y="426" width="124" height="40" rx="6" fill="#388E3C"/>
+  <text x="90" y="442" text-anchor="middle" font-size="9" font-weight="bold" fill="white">Auditor</text>
+  <text x="90" y="456" text-anchor="middle" font-size="8" fill="#C8E6C9">Read-only audit logs</text>
+
+  <rect x="180" y="60" width="530" height="490" rx="10" fill="#EDE7F6" stroke="#B39DDB" stroke-width="1.5"/>
+  <text x="445" y="79" text-anchor="middle" font-size="10" font-weight="bold" fill="#6A1B9A">SAP BUSINESS TECHNOLOGY PLATFORM (BTP)</text>
+
+  <rect x="196" y="88" width="200" height="60" rx="6" fill="#7B1FA2"/>
+  <text x="296" y="108" text-anchor="middle" font-size="9" font-weight="bold" fill="white">XSUAA + BTP IAS</text>
+  <text x="296" y="121" text-anchor="middle" font-size="8" fill="#E1BEE7">OAuth2 / Token auth</text>
+  <text x="296" y="133" text-anchor="middle" font-size="8" fill="#E1BEE7">External IdP for vendors</text>
+
+  <rect x="196" y="166" width="200" height="80" rx="6" fill="#4527A0"/>
+  <text x="296" y="184" text-anchor="middle" font-size="9" font-weight="bold" fill="white">React Frontend</text>
+  <text x="296" y="197" text-anchor="middle" font-size="8" fill="#D1C4E9">Vite + UI5 Web Components</text>
+  <text x="296" y="209" text-anchor="middle" font-size="8" fill="#D1C4E9">TanStack Query / Router</text>
+  <text x="296" y="221" text-anchor="middle" font-size="8" fill="#D1C4E9">SAP Approuter (xs-app.json)</text>
+  <text x="296" y="233" text-anchor="middle" font-size="8" fill="#CE93D8">Dashboard · Shipments · PriceLedger · AuditLogs</text>
+
+  <rect x="196" y="264" width="200" height="130" rx="6" fill="#1565C0"/>
+  <text x="296" y="283" text-anchor="middle" font-size="9" font-weight="bold" fill="white">CAP Backend (Node.js)</text>
+  <text x="296" y="296" text-anchor="middle" font-size="8" fill="#BBDEFB">OData V4 · Draft Handling</text>
+  <text x="296" y="308" text-anchor="middle" font-size="8" fill="#BBDEFB">procurement-service.cds/.js</text>
+  <rect x="204" y="316" width="85" height="16" rx="3" fill="#0D47A1"/>
+  <text x="247" y="327" text-anchor="middle" font-size="7" fill="white">criticalDelay action</text>
+  <rect x="298" y="316" width="90" height="16" rx="3" fill="#0D47A1"/>
+  <text x="343" y="327" text-anchor="middle" font-size="7" fill="white">approve/reject action</text>
+  <rect x="204" y="337" width="85" height="16" rx="3" fill="#0D47A1"/>
+  <text x="247" y="348" text-anchor="middle" font-size="7" fill="white">srv.before SAVE</text>
+  <rect x="298" y="337" width="90" height="16" rx="3" fill="#0D47A1"/>
+  <text x="343" y="348" text-anchor="middle" font-size="7" fill="white">media stream PUT</text>
+  <rect x="204" y="358" width="184" height="16" rx="3" fill="#0D47A1"/>
+  <text x="296" y="369" text-anchor="middle" font-size="7" fill="white">RBAC: vendorCode = $user.VendorID</text>
+
+  <rect x="196" y="412" width="200" height="110" rx="6" fill="#00695C"/>
+  <text x="296" y="430" text-anchor="middle" font-size="9" font-weight="bold" fill="white">SAP HANA Cloud (HDI)</text>
+  <text x="296" y="443" text-anchor="middle" font-size="8" fill="#B2DFDB">Shipments · ShipmentItems</text>
+  <text x="296" y="455" text-anchor="middle" font-size="8" fill="#B2DFDB">Vendors · Products</text>
+  <text x="296" y="467" text-anchor="middle" font-size="8" fill="#B2DFDB">PriceLedger (temporal)</text>
+  <text x="296" y="479" text-anchor="middle" font-size="8" fill="#B2DFDB">AuditLogs</text>
+  <rect x="204" y="487" width="184" height="16" rx="3" fill="#00897B"/>
+  <text x="296" y="498" text-anchor="middle" font-size="7" fill="white">invoiceScan: LargeBinary (trial limitation)</text>
+
+  <rect x="418" y="88" width="164" height="56" rx="6" fill="#E65100"/>
+  <text x="500" y="107" text-anchor="middle" font-size="9" font-weight="bold" fill="white">Destination Service</text>
+  <text x="500" y="120" text-anchor="middle" font-size="8" fill="#FFE0B2">S4_API destination</text>
+  <text x="500" y="132" text-anchor="middle" font-size="8" fill="#FFE0B2">Routes to S/4HANA URL</text>
+
+  <rect x="418" y="156" width="164" height="44" rx="6" fill="#BF360C"/>
+  <text x="500" y="174" text-anchor="middle" font-size="9" font-weight="bold" fill="white">Connectivity Service</text>
+  <text x="500" y="187" text-anchor="middle" font-size="8" fill="#FFCCBC">On-premise proxy</text>
+
+  <rect x="418" y="212" width="164" height="60" rx="6" fill="#E65100"/>
+  <text x="500" y="230" text-anchor="middle" font-size="9" font-weight="bold" fill="white">Alert Notification</text>
+  <text x="500" y="243" text-anchor="middle" font-size="8" fill="#FFE0B2">Email on criticalDelay</text>
+  <text x="500" y="255" text-anchor="middle" font-size="8" fill="#FFE0B2">Replaces Event Mesh</text>
+  <text x="500" y="265" text-anchor="middle" font-size="7" fill="#FFAB40">(trial limitation)</text>
+
+  <rect x="418" y="284" width="164" height="70" rx="6" fill="#4A148C"/>
+  <text x="500" y="302" text-anchor="middle" font-size="9" font-weight="bold" fill="white">xs-security.json</text>
+  <text x="500" y="315" text-anchor="middle" font-size="8" fill="#E1BEE7">VendorUser · VendorAdmin</text>
+  <text x="500" y="327" text-anchor="middle" font-size="8" fill="#E1BEE7">ProcurementManager</text>
+  <text x="500" y="339" text-anchor="middle" font-size="8" fill="#E1BEE7">Auditor · VendorID attr</text>
+
+  <rect x="418" y="366" width="164" height="44" rx="6" fill="#37474F"/>
+  <text x="500" y="384" text-anchor="middle" font-size="9" font-weight="bold" fill="white">MTA Deployment</text>
+  <text x="500" y="397" text-anchor="middle" font-size="8" fill="#CFD8DC">mta.yaml · mbt build · cf deploy</text>
+
+  <rect x="730" y="60" width="154" height="490" rx="10" fill="#FFF3E0" stroke="#FFCC80" stroke-width="1.5"/>
+  <text x="807" y="79" text-anchor="middle" font-size="10" font-weight="bold" fill="#E65100">SAP S/4HANA CLOUD</text>
+  <text x="807" y="91" text-anchor="middle" font-size="8" fill="#BF360C">my405597-api.s4hana.cloud.sap</text>
+  <rect x="742" y="100" width="130" height="50" rx="6" fill="#E65100"/>
+  <text x="807" y="118" text-anchor="middle" font-size="8" font-weight="bold" fill="white">API_PURCHASEORDER</text>
+  <text x="807" y="130" text-anchor="middle" font-size="7" fill="#FFE0B2">_PROCESS_SRV</text>
+  <text x="807" y="142" text-anchor="middle" font-size="7" fill="#FFE0B2">SAP_COM_0053</text>
+  <rect x="742" y="162" width="130" height="50" rx="6" fill="#EF6C00"/>
+  <text x="807" y="180" text-anchor="middle" font-size="8" font-weight="bold" fill="white">API_BUSINESS_PARTNER</text>
+  <text x="807" y="193" text-anchor="middle" font-size="7" fill="#FFE0B2">Sync Vendor details</text>
+  <text x="807" y="205" text-anchor="middle" font-size="7" fill="#FFE0B2">SAP_COM_0008</text>
+  <rect x="742" y="224" width="130" height="50" rx="6" fill="#F57C00"/>
+  <text x="807" y="242" text-anchor="middle" font-size="8" font-weight="bold" fill="white">API_PRODUCT_SRV</text>
+  <text x="807" y="255" text-anchor="middle" font-size="7" fill="#FFE0B2">Product master data</text>
+  <text x="807" y="267" text-anchor="middle" font-size="7" fill="#FFE0B2">SAP_COM_0009</text>
+  <rect x="742" y="286" width="130" height="50" rx="6" fill="#FB8C00"/>
+  <text x="807" y="304" text-anchor="middle" font-size="8" font-weight="bold" fill="white">API_SUPPLIERINVOICE</text>
+  <text x="807" y="316" text-anchor="middle" font-size="7" fill="#FFE0B2">_PROCESS_SRV</text>
+  <text x="807" y="328" text-anchor="middle" font-size="7" fill="#FFE0B2">SAP_COM_0057</text>
+  <rect x="742" y="348" width="130" height="44" rx="6" fill="#37474F"/>
+  <text x="807" y="366" text-anchor="middle" font-size="8" font-weight="bold" fill="white">Communication</text>
+  <text x="807" y="378" text-anchor="middle" font-size="7" fill="#CFD8DC">Arrangement setup</text>
+
+  <defs>
+    <marker id="ab" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#1565C0"/></marker>
+    <marker id="ag" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#2E7D32"/></marker>
+    <marker id="ap" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#7B1FA2"/></marker>
+    <marker id="ai" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#4527A0"/></marker>
+    <marker id="ao" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#E65100"/></marker>
+  </defs>
+
+  <line x1="152" y1="118" x2="196" y2="200" stroke="#1565C0" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#ab)"/>
+  <line x1="152" y1="395" x2="196" y2="230" stroke="#2E7D32" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#ag)"/>
+  <line x1="296" y1="148" x2="296" y2="166" stroke="#7B1FA2" stroke-width="1.5" marker-end="url(#ap)"/>
+  <line x1="296" y1="246" x2="296" y2="264" stroke="#4527A0" stroke-width="1.5" marker-end="url(#ai)"/>
+  <line x1="296" y1="394" x2="296" y2="412" stroke="#1565C0" stroke-width="1.5" marker-end="url(#ab)"/>
+  <line x1="396" y1="300" x2="418" y2="116" stroke="#E65100" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#ao)"/>
+  <line x1="396" y1="320" x2="418" y2="242" stroke="#E65100" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#ao)"/>
+  <line x1="396" y1="340" x2="418" y2="319" stroke="#4A148C" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#ap)"/>
+  <line x1="582" y1="116" x2="730" y2="180" stroke="#E65100" stroke-width="1.5" marker-end="url(#ao)"/>
+
+  <rect x="180" y="558" width="530" height="52" rx="6" fill="white" stroke="#DEE2E6" stroke-width="1"/>
+  <text x="196" y="572" font-size="8" font-weight="bold" fill="#37474F">KNOWN DEVIATIONS (trial account limitations):</text>
+  <rect x="196" y="578" width="6" height="6" fill="#FFB300"/>
+  <text x="207" y="585" font-size="8" fill="#555">PDF stored in HANA LargeBinary — DMS/Object Store not available on BTP trial</text>
+  <rect x="196" y="592" width="6" height="6" fill="#FFB300"/>
+  <text x="207" y="599" font-size="8" fill="#555">Alert Notification replaces Event Mesh — Event Mesh trial plan retired Feb 2023</text>
+</svg>

@@ -1,5 +1,29 @@
 const cds = require('@sap/cds');
 
+// ─── Supabase Storage config ──────────────────────────────────────────────
+const SUPABASE_URL    = process.env.SUPABASE_URL    || 'https://txdrpxbbeenefbeqexiv.supabase.co';
+const SUPABASE_ANON   = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR4ZHJweGJiZWVuZWZiZXFleGl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczNDk3MDYsImV4cCI6MjA5MjkyNTcwNn0.fZVp8DO4HyieXWEJ8Ydx1Xrg4iD9JdVP5fv0wcibjtI';
+const SUPABASE_BUCKET = 'invoices';
+
+async function uploadToSupabase(buffer, filePath, mimeType) {
+    const url = `${SUPABASE_URL}/storage/v1/object/${SUPABASE_BUCKET}/${filePath}`;
+    const res = await fetch(url, {
+        method:  'POST',
+        headers: {
+            'Authorization': `Bearer ${SUPABASE_ANON}`,
+            'Content-Type':  mimeType,
+            'x-upsert':      'true',
+        },
+        body: buffer,
+    });
+    if (!res.ok) {
+        const err = await res.text();
+        throw new Error(`Supabase upload failed: ${err}`);
+    }
+    // Return public URL
+    return `${SUPABASE_URL}/storage/v1/object/public/${SUPABASE_BUCKET}/${filePath}`;
+}
+
 // ─── Helper: BTP Alert Notification REST call ─────────────────────────────
 async function sendAlertNotification({ subject, body, shipmentId, severity = 'WARNING' }) {
     try {
@@ -153,7 +177,7 @@ module.exports = cds.service.impl(async function () {
         }
     });
 
-    // ─── MEDIA STREAM: Upload PDF Invoice ─────────────────────────────────
+    // ─── MEDIA STREAM: Upload PDF → Supabase Storage, metadata → AssetAttachments ──
     this.on('PUT', 'Shipments', async (req, next) => {
         const contentType = req.headers?.['content-type'] || '';
         if (!contentType.includes('application/pdf')) return next();
@@ -162,6 +186,7 @@ module.exports = cds.service.impl(async function () {
         console.log('[MediaStream] Receiving PDF for shipment:', shipmentId);
 
         try {
+            // 1. Collect stream into buffer
             let pdfBuffer;
             if (Buffer.isBuffer(req.data)) {
                 pdfBuffer = req.data;
@@ -181,11 +206,25 @@ module.exports = cds.service.impl(async function () {
 
             console.log('[MediaStream] PDF size:', pdfBuffer.length, 'bytes');
 
-            await UPDATE(Shipments)
-                .set({ invoiceScan: pdfBuffer })
-                .where({ ID: shipmentId });
+            // 2. Upload to Supabase Storage (keeps HANA lean — no binary in DB)
+            const fileName   = `invoice_${shipmentId}_${Date.now()}.pdf`;
+            const filePath   = `${shipmentId}/${fileName}`;
+            const storageUrl = await uploadToSupabase(pdfBuffer, filePath, 'application/pdf');
+            console.log('[MediaStream] Uploaded to Supabase:', storageUrl);
 
-            // Mock AI/OCR extraction
+            // 3. Save metadata to AssetAttachments (HANA only stores URL, not binary)
+            const { AssetAttachments } = cds.entities('hub.procurement');
+            await INSERT.into(AssetAttachments).entries({
+                shipment_ID: shipmentId,
+                fileName:    fileName,
+                mimeType:    'application/pdf',
+                storageUrl:  storageUrl,
+                fileSize:    pdfBuffer.length,
+                uploadedAt:  new Date().toISOString(),
+                uploadedBy:  req.user?.id || 'system',
+            });
+
+            // 4. Mock AI/OCR extraction (replace with BTP Document AI in production)
             await new Promise(resolve => setTimeout(resolve, 50));
             const ocrResult = {
                 trackingNumber: `TRK-${shipmentId?.substring(0, 8).toUpperCase()}`,
@@ -193,16 +232,18 @@ module.exports = cds.service.impl(async function () {
                 extractedDate:  new Date().toISOString(),
                 confidence:     0.95,
                 source:         'mock-ai-ocr',
+                storageUrl:     storageUrl,
             };
             console.log('[MediaStream] OCR result:', ocrResult);
 
+            // 5. Audit log
             await INSERT.into(AuditLogs).entries({
                 entityName: 'Shipments',
                 entityId:   shipmentId,
                 action:     'INVOICE_UPLOADED',
                 changedBy:  req.user?.id || 'system',
                 changedAt:  new Date().toISOString(),
-                newValue:   JSON.stringify(ocrResult),
+                newValue:   JSON.stringify({ fileName, storageUrl, ...ocrResult }),
             });
 
             return ocrResult;

@@ -1,6 +1,14 @@
 {
   "xsappname": "poc2-procurement-hub",
   "tenant-mode": "dedicated",
+  "oauth2-configuration": {
+    "token-validity": 43200,
+    "redirect-uris": [
+      "https://*.hana.ondemand.com/**",
+      "https://*.cfapps.us10-001.hana.ondemand.com/**"
+    ],
+    "credential-types": ["binding-secret", "x509"]
+  },
   "scopes": [
     { "name": "$XSAPPNAME.VendorUser",       "description": "Vendor can manage own shipments" },
     { "name": "$XSAPPNAME.VendorAdmin",       "description": "Vendor admin can manage contacts" },

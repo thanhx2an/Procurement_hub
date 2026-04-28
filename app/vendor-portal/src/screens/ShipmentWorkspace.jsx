@@ -103,19 +103,26 @@ export default function ShipmentWorkspace() {
     },
   });
 
-  // ── File upload ────────────────────────────────────────────────────────
-  const handleFileUpload = async (e, shipmentId) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploadMsg({ type: "Information", text: "Uploading PDF and running AI/OCR..." });
-    try {
-      const result = await uploadInvoice(shipmentId, file);
+  // ── File upload via useMutation (TanStack Query) ───────────────────────
+  const uploadMutation = useMutation({
+    mutationFn: ({ shipmentId, file }) => uploadInvoice(shipmentId, file),
+    onMutate: () => {
+      setUploadMsg({ type: "Information", text: "Uploading PDF and running AI/OCR..." });
+    },
+    onSuccess: (result) => {
       setOcrResult(result);
       setUploadMsg({ type: "Positive", text: `✅ PDF uploaded! Tracking: ${result?.trackingNumber}` });
       queryClient.invalidateQueries(["shipments"]);
-    } catch (err) {
+    },
+    onError: (err) => {
       setUploadMsg({ type: "Negative", text: `Upload failed: ${err.message}` });
-    }
+    },
+  });
+
+  const handleFileUpload = (e, shipmentId) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    uploadMutation.mutate({ shipmentId, file });
   };
 
   // ── Table columns ──────────────────────────────────────────────────────
@@ -243,7 +250,13 @@ export default function ShipmentWorkspace() {
               <div style={{ gridColumn: "span 2", marginTop: "0.75rem" }}>
                 <strong>Upload Invoice PDF:</strong><br />
                 <input type="file" accept="application/pdf" style={{ marginTop: "0.5rem" }}
+                  disabled={uploadMutation.isPending}
                   onChange={(e) => handleFileUpload(e, selected.ID)} />
+                {uploadMutation.isPending && (
+                  <span style={{ marginLeft: "0.5rem", fontSize: "0.8rem", color: "var(--sapContent_LabelColor)" }}>
+                    ⏳ Uploading to Supabase Storage...
+                  </span>
+                )}
               </div>
 
               {ocrResult && (
@@ -252,6 +265,14 @@ export default function ShipmentWorkspace() {
                   <div>Tracking: <strong>{ocrResult.trackingNumber}</strong></div>
                   <div>Batch ID: <strong>{ocrResult.batchId}</strong></div>
                   <div>Confidence: <strong>{(ocrResult.confidence * 100).toFixed(0)}%</strong></div>
+                  {ocrResult.storageUrl && (
+                    <div style={{ marginTop: "0.5rem" }}>
+                      📎 <a href={ocrResult.storageUrl} target="_blank" rel="noreferrer"
+                        style={{ color: "var(--sapLinkColor)" }}>
+                        View uploaded PDF in Supabase Storage
+                      </a>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
