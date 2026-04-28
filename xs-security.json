@@ -1,23 +1,19 @@
 {
   "xsappname": "poc2-procurement-hub",
   "tenant-mode": "dedicated",
+  "oauth2-configuration": {
+    "token-validity": 43200,
+    "redirect-uris": [
+      "https://*.hana.ondemand.com/**",
+      "https://*.cfapps.us10-001.hana.ondemand.com/**"
+    ],
+    "credential-types": ["binding-secret", "x509"]
+  },
   "scopes": [
-    {
-      "name": "$XSAPPNAME.VendorUser",
-      "description": "Vendor can manage own shipments"
-    },
-    {
-      "name": "$XSAPPNAME.VendorAdmin",
-      "description": "Vendor admin can manage contacts"
-    },
-    {
-      "name": "$XSAPPNAME.ProcurementManager",
-      "description": "Full access to all vendors"
-    },
-    {
-      "name": "$XSAPPNAME.Auditor",
-      "description": "Read-only access to audit logs"
-    }
+    { "name": "$XSAPPNAME.VendorUser",        "description": "Vendor can manage own shipments" },
+    { "name": "$XSAPPNAME.VendorAdmin",        "description": "Vendor admin can manage contacts" },
+    { "name": "$XSAPPNAME.ProcurementManager", "description": "Full access to all vendors" },
+    { "name": "$XSAPPNAME.Auditor",            "description": "Read-only access to audit logs" }
   ],
   "attributes": [
     {
@@ -30,41 +26,24 @@
     {
       "name": "VendorUser",
       "description": "External vendor managing own shipments",
-      "scope-references": [
-        "$XSAPPNAME.VendorUser"
-      ],
-      "attribute-references": [
-        "VendorID"
-      ]
+      "scope-references": [ "$XSAPPNAME.VendorUser" ],
+      "attribute-references": [ "VendorID" ]
     },
     {
       "name": "VendorAdmin",
       "description": "Vendor administrator",
-      "scope-references": [
-        "$XSAPPNAME.VendorAdmin"
-      ],
-      "attribute-references": [
-        "VendorID"
-      ]
+      "scope-references": [ "$XSAPPNAME.VendorAdmin" ],
+      "attribute-references": [ "VendorID" ]
     },
     {
       "name": "ProcurementManager",
       "description": "Internal procurement manager",
-      "scope-references": [
-        "$XSAPPNAME.ProcurementManager"
-      ]
+      "scope-references": [ "$XSAPPNAME.ProcurementManager" ]
     },
     {
       "name": "Auditor",
       "description": "Compliance auditor",
-      "scope-references": [
-        "$XSAPPNAME.Auditor"
-      ]
+      "scope-references": [ "$XSAPPNAME.Auditor" ]
     }
-  ],
-  "oauth2-configuration": {
-    "redirect-uris": [
-      "https://1aae4b04trial-dev-poc2-approuter.cfapps.us10-001.hana.ondemand.com/**"
-    ]
-  }
+  ]
 }
