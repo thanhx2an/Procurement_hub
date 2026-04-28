@@ -91,13 +91,18 @@ modules:
           name: vendor-portal
           url: ~{url}
           forwardAuthToken: false
-          
+
       - name: poc2-destination
 
 resources:
-  # ─── XSUAA (đã tồn tại) ───
+  # ─── XSUAA ───
   - name: poc2-auth
-    type: org.cloudfoundry.existing-service
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: xsuaa
+      service-plan: application
+      service-name: poc2-auth
+      path: ./xs-security.json
 
   # ─── HANA Cloud ───
   - name: poc2-db
