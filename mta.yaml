@@ -128,3 +128,9 @@ resources:
       service-plan: lite
       service-name: poc2-connectivity
 
+  - name: poc2-alert-notification
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: alert-notification
+      service-plan: free
+    
