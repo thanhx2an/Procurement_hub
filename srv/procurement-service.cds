@@ -5,32 +5,32 @@ using { API_SUPPLIERINVOICE as INV } from './external/API_SUPPLIERINVOICE';
 service ProcurementService @(requires: 'authenticated-user') @(path: '/procurement') {
 
     // ─── Vendors: Manager thấy tất cả, Vendor chỉ thấy của mình ───
+    // where clause bỏ vì Vendors lấy live từ S/4HANA, filter xử lý trong JS
     @(restrict: [
         { grant: 'READ', to: 'ProcurementManager' },
-        
-        { grant: 'READ', to: 'VendorUser', where: 'BusinessPartner = $user.VendorID' },
-        { grant: 'READ', to: 'VendorAdmin', where: 'BusinessPartner = $user.VendorID' }
+        { grant: 'READ', to: 'VendorUser' },
+        { grant: 'READ', to: 'VendorAdmin' }
     ])
     entity Vendors as projection on db.Vendors;
 
-    // ─── Products: tất cả roles đều đọc được ───
+    // ─── Products ───
     @readonly
     @(restrict: [
         { grant: 'READ', to: ['ProcurementManager', 'VendorUser', 'VendorAdmin', 'Auditor'] }
     ])
     entity Products as projection on db.Products;
 
-    // ─── Shipments: Draft enabled, Vendor chỉ thấy shipment của mình ───
+    // ─── Shipments: dùng vendorCode (từ bạn bè) vì schema đã merge ───
     @odata.draft.enabled
     @(restrict: [
         { grant: ['READ', 'WRITE'], to: 'ProcurementManager' },
-        { grant: ['READ', 'WRITE'], to: 'VendorUser',  where: 'vendor_BusinessPartner = $user.VendorID' },
-        { grant: ['READ', 'WRITE'], to: 'VendorAdmin', where: 'vendor_BusinessPartner = $user.VendorID' },
+        { grant: ['READ', 'WRITE'], to: 'VendorUser',  where: 'vendorCode = $user.VendorID' },
+        { grant: ['READ', 'WRITE'], to: 'VendorAdmin', where: 'vendorCode = $user.VendorID' },
         { grant: 'READ',            to: 'Auditor' }
     ])
     entity Shipments as projection on db.Shipments;
 
-    // ─── ShipmentItems: theo Shipment ───
+    // ─── ShipmentItems ───
     @(restrict: [
         { grant: ['READ', 'WRITE'], to: 'ProcurementManager' },
         { grant: ['READ', 'WRITE'], to: ['VendorUser', 'VendorAdmin'] },
@@ -38,14 +38,22 @@ service ProcurementService @(requires: 'authenticated-user') @(path: '/procureme
     ])
     entity ShipmentItems as projection on db.ShipmentItems;
 
-    // ─── PriceLedger: Vendor write, Manager + Auditor read ───
+    // ─── AssetAttachments ───
+    @(restrict: [
+        { grant: ['READ', 'WRITE'], to: 'ProcurementManager' },
+        { grant: ['READ', 'WRITE'], to: ['VendorUser', 'VendorAdmin'] },
+        { grant: 'READ',            to: 'Auditor' }
+    ])
+    entity AssetAttachments as projection on db.AssetAttachments;
+
+    // ─── PriceLedger ───
     @(restrict: [
         { grant: 'READ',            to: ['ProcurementManager', 'Auditor'] },
         { grant: ['READ', 'WRITE'], to: ['VendorUser', 'VendorAdmin'] }
     ])
     entity PriceLedger as projection on db.PriceLedger;
 
-    // ─── AuditLogs: chỉ Auditor và Manager đọc ───
+    // ─── AuditLogs ───
     @readonly
     @(restrict: [
         { grant: 'READ', to: ['ProcurementManager', 'Auditor'] }
@@ -68,7 +76,13 @@ service ProcurementService @(requires: 'authenticated-user') @(path: '/procureme
     ])
     entity SupplierInvoices as projection on INV.A_SupplierInvoice;
 
-    // ─── criticalDelay: chỉ Manager ───
+    // ─── Actions ───
+    @(requires: ['VendorUser', 'VendorAdmin', 'ProcurementManager'])
+    action criticalDelay(shipmentId: UUID, reason: String) returns String;
+
     @(requires: 'ProcurementManager')
-    action criticalDelay(shipmentId: UUID) returns String;
+    action approveException(shipmentId: UUID, newDeliveryDate: DateTime) returns String;
+
+    @(requires: 'ProcurementManager')
+    action rejectException(shipmentId: UUID) returns String;
 }
