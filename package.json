@@ -1,7 +1,8 @@
 {
   "name": "poc2-procurement-hub",
   "version": "1.0.0",
-  "description": "A simple CAP project.",
+  "private": true,
+
   "dependencies": {
     "@cap-js/hana": "^2.7.1",
     "@sap-cloud-sdk/connectivity": "^4",
@@ -11,15 +12,19 @@
     "@sap/xssec": "^4.13.0",
     "express": "^4"
   },
+
   "devDependencies": {
     "@cap-js/sqlite": "^2"
   },
+
   "scripts": {
-    "start": "cds-serve"
+    "start": "cds-serve",
+    "build": "cds build --production"
   },
-  "private": true,
+
   "cds": {
     "requires": {
+
       "API_BUSINESS_PARTNER": {
         "kind": "odata-v2",
         "model": "srv/external/API_BUSINESS_PARTNER",
@@ -28,6 +33,7 @@
           "path": "/sap/opu/odata/sap/API_BUSINESS_PARTNER"
         }
       },
+
       "API_PRODUCT": {
         "kind": "odata-v2",
         "model": "srv/external/API_PRODUCT",
@@ -36,6 +42,7 @@
           "path": "/sap/opu/odata/sap/API_PRODUCT_SRV"
         }
       },
+
       "API_SUPPLIERINVOICE": {
         "kind": "odata-v2",
         "model": "srv/external/API_SUPPLIERINVOICE",
@@ -44,6 +51,7 @@
           "path": "/sap/opu/odata/sap/API_SUPPLIERINVOICE_PROCESS_SRV"
         }
       },
+
       "API_PURCHASEORDER": {
         "kind": "odata",
         "model": "srv/external/API_PURCHASEORDER",
@@ -52,61 +60,22 @@
           "path": "/sap/opu/odata4/sap/api_purchaseorder_2/srvd_a2x/sap/purchaseorder/0001"
         }
       },
-      "[production]": {
-        "API_BUSINESS_PARTNER": {
-          "kind": "odata-v2",
-          "model": "srv/external/API_BUSINESS_PARTNER",
-          "credentials": {
-            "destination": "S4_API",
-            "path": "/sap/opu/odata/sap/API_BUSINESS_PARTNER"
-          }
-        },
-        "API_PRODUCT": {
-          "kind": "odata-v2",
-          "model": "srv/external/API_PRODUCT",
-          "credentials": {
-            "destination": "S4_API",
-            "path": "/sap/opu/odata/sap/API_PRODUCT_SRV"
-          }
-        },
-        "API_SUPPLIERINVOICE": {
-          "kind": "odata-v2",
-          "model": "srv/external/API_SUPPLIERINVOICE",
-          "credentials": {
-            "destination": "S4_API",
-            "path": "/sap/opu/odata/sap/API_SUPPLIERINVOICE_PROCESS_SRV"
-          }
-        },
-        "API_PURCHASEORDER": {
-          "kind": "odata",
-          "model": "srv/external/API_PURCHASEORDER",
-          "credentials": {
-            "destination": "S4_API",
-            "path": "/sap/opu/odata4/sap/api_purchaseorder_2/srvd_a2x/sap/purchaseorder/0001"
-          }
-        },
-        "db": {
-          "kind": "hana"
-        },
-        "auth": "xsuaa"
+
+      "db": {
+        "kind": "hana"
       },
+
+      "auth": "xsuaa",
       "destinations": true,
       "connectivity": true
     },
-    "fiori": {
-      "bypass_draft": true
-    },
+
     "build": {
       "target": "gen",
       "tasks": [
         {
           "for": "hana",
-          "src": "db",
-          "options": {
-            "model": [
-              "db"
-            ]
-          }
+          "src": "db"
         },
         {
           "for": "nodejs",
