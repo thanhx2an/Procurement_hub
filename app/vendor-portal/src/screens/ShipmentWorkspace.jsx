@@ -77,6 +77,8 @@ export default function ShipmentWorkspace() {
   const approveRef = useRef({});
   const exceptionRef = useRef({});
   const deliveryDatePickerRef = useRef(null);
+  const approveDatePickerRef = useRef(null);
+  const exceptionDatePickerRef = useRef(null);
 
   const { data: shipments = [], isLoading } = useQuery({
     queryKey: ["shipments"],
@@ -609,11 +611,22 @@ export default function ShipmentWorkspace() {
               <Button
                 design="Attention"
                 disabled={delayMutation.isPending}
-                onClick={() => delayMutation.mutate({
-                  shipmentId: exceptionShipment?.ID,
-                  reason: exceptionRef.current.reason || '',
-                  proposedDeliveryDate: exceptionRef.current.proposedDeliveryDate || null,
-                })}
+                onClick={() => {
+                  if (!exceptionRef.current.proposedDeliveryDate) {
+                    const raw = exceptionDatePickerRef.current?.value;
+                    if (raw) {
+                      const parsed = new Date(raw);
+                      if (!isNaN(parsed)) {
+                        exceptionRef.current.proposedDeliveryDate = parsed.toISOString().split('T')[0] + 'T00:00:00Z';
+                      }
+                    }
+                  }
+                  delayMutation.mutate({
+                    shipmentId: exceptionShipment?.ID,
+                    reason: exceptionRef.current.reason || '',
+                    proposedDeliveryDate: exceptionRef.current.proposedDeliveryDate || null,
+                  });
+                }}
               >
                 {delayMutation.isPending ? "Submitting…" : "Submit Exception"}
               </Button>
@@ -634,12 +647,15 @@ export default function ShipmentWorkspace() {
           </FormItem>
           <FormItem label={<Label>Proposed New Delivery Date</Label>}>
             <DatePicker
+              ref={exceptionDatePickerRef}
               minDate={new Date().toLocaleDateString('en-US')}
               onChange={(e) => {
-                const val = e.detail?.value;
+                const val = e.detail?.value || e.target?.value;
                 if (val) {
-                  const [m, d, y] = val.split('/');
-                  exceptionRef.current.proposedDeliveryDate = `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}T00:00:00Z`;
+                  const parsed = new Date(val);
+                  if (!isNaN(parsed)) {
+                    exceptionRef.current.proposedDeliveryDate = parsed.toISOString().split('T')[0] + 'T00:00:00Z';
+                  }
                 }
               }}
             />
@@ -658,12 +674,25 @@ export default function ShipmentWorkspace() {
               <Button
                 design="Positive"
                 disabled={approveMutation.isPending}
-                onClick={() => approveMutation.mutate({
-                  shipmentId: selected?.ID,
-                  newDeliveryDate: approveRef.current.newDeliveryDate
-                    || selected?.proposedDeliveryDate
-                    || new Date().toISOString(),
-                })}
+                onClick={() => {
+                  // Fallback: đọc từ DOM nếu onChange chưa fire
+                  if (!approveRef.current.newDeliveryDate) {
+                    const raw = approveDatePickerRef.current?.value;
+                    if (raw) {
+                      const parsed = new Date(raw);
+                      if (!isNaN(parsed)) {
+                        approveRef.current.newDeliveryDate = parsed.toISOString().split('T')[0] + 'T00:00:00Z';
+                      }
+                    }
+                  }
+                  const finalDate = approveRef.current.newDeliveryDate
+                    || selected?.proposedDeliveryDate;
+                  if (!finalDate) {
+                    alert("Please select a new delivery date.");
+                    return;
+                  }
+                  approveMutation.mutate({ shipmentId: selected?.ID, newDeliveryDate: finalDate });
+                }}
               >
                 {approveMutation.isPending ? "Approving…" : "Confirm Approve"}
               </Button>
@@ -689,15 +718,18 @@ export default function ShipmentWorkspace() {
           </FormItem>
           <FormItem label={<Label>New Delivery Date (modify if needed)</Label>}>
             <DatePicker
+              ref={approveDatePickerRef}
               minDate={new Date().toLocaleDateString('en-US')}
               value={selected?.proposedDeliveryDate
                 ? new Date(selected.proposedDeliveryDate).toLocaleDateString('en-US')
                 : ''}
               onChange={(e) => {
-                const val = e.detail?.value;
+                const val = e.detail?.value || e.target?.value;
                 if (val) {
-                  const [m, d, y] = val.split('/');
-                  approveRef.current.newDeliveryDate = `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}T00:00:00Z`;
+                  const parsed = new Date(val);
+                  if (!isNaN(parsed)) {
+                    approveRef.current.newDeliveryDate = parsed.toISOString().split('T')[0] + 'T00:00:00Z';
+                  }
                 }
               }}
             />

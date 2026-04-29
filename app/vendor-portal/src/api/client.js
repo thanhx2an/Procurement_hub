@@ -74,7 +74,7 @@ export const fetchAttachments = async (shipmentId) => {
   return data.value;
 };
 export const deleteAttachment = async (id) => {
-  await api.delete(`/AssetAttachments(ID=${id})`);
+  await api.delete(`/AssetAttachments(ID=${id},IsActiveEntity=true)`);
 };
 export const fetchPriceLedger = async () => {
   const { data } = await api.get("/PriceLedger?$orderby=validFrom desc");
