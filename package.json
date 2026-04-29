@@ -82,6 +82,12 @@
           "src": "srv"
         }
       ]
+    },
+
+    "server": {
+      "body-parser": {
+        "limit": "20mb"
+      }
     }
   }
 }

@@ -5,6 +5,7 @@ import AppShell from './components/AppShell';
 import Dashboard from './screens/Dashboard';
 import ShipmentWorkspace from './screens/ShipmentWorkspace';
 import PriceLedger from './screens/PriceLedger';
+import AuditLogs from './screens/AuditLogs';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -23,6 +24,7 @@ export default function App() {
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/shipments" element={<ShipmentWorkspace />} />
               <Route path="/price-ledger" element={<PriceLedger />} />
+              <Route path="/audit-logs" element={<AuditLogs />} />
             </Routes>
           </AppShell>
         </BrowserRouter>

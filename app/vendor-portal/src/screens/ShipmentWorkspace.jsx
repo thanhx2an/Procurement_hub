@@ -26,6 +26,8 @@ import {
   uploadInvoice,
   triggerCriticalDelay,
   fetchVendors,
+  approveException,
+  rejectException,
 } from "../api/client";
 
 const STATUS_STYLES = {
@@ -61,7 +63,10 @@ export default function ShipmentWorkspace() {
   const [selected, setSelected] = useState(null);
   const [uploadMsg, setUploadMsg] = useState(null);
   const [ocrResult, setOcrResult] = useState(null);
+  const [actionMsg, setActionMsg] = useState(null);
+  const [approveDialogOpen, setApproveDialogOpen] = useState(false);
   const formRef = useRef({});
+  const approveRef = useRef({});
 
   const { data: shipments = [], isLoading } = useQuery({
     queryKey: ["shipments"],
@@ -86,6 +91,29 @@ export default function ShipmentWorkspace() {
   const delayMutation = useMutation({
     mutationFn: triggerCriticalDelay,
     onSuccess: () => queryClient.invalidateQueries(["shipments"]),
+  });
+
+  const approveMutation = useMutation({
+    mutationFn: approveException,
+    onSuccess: (_, vars) => {
+      queryClient.invalidateQueries(["shipments"]);
+      setApproveDialogOpen(false);
+      setActionMsg({ type: "Positive", text: "✅ Exception approved — shipment set to Shipped." });
+      setSelected((prev) => prev ? { ...prev, status: "Shipped" } : prev);
+      setTimeout(() => setActionMsg(null), 4000);
+    },
+    onError: (err) => setActionMsg({ type: "Negative", text: `Approve failed: ${err.message}` }),
+  });
+
+  const rejectMutation = useMutation({
+    mutationFn: rejectException,
+    onSuccess: () => {
+      queryClient.invalidateQueries(["shipments"]);
+      setActionMsg({ type: "Information", text: "↩️ Exception rejected — shipment set back to Pending." });
+      setSelected((prev) => prev ? { ...prev, status: "Pending" } : prev);
+      setTimeout(() => setActionMsg(null), 4000);
+    },
+    onError: (err) => setActionMsg({ type: "Negative", text: `Reject failed: ${err.message}` }),
   });
 
   const handleFileUpload = async (e, shipmentId) => {
@@ -185,6 +213,15 @@ export default function ShipmentWorkspace() {
           </MessageStrip>
         )}
 
+        {actionMsg && (
+          <MessageStrip
+            design={actionMsg.type}
+            onClose={() => setActionMsg(null)}
+          >
+            {actionMsg.text}
+          </MessageStrip>
+        )}
+
         <Card
           header={
             <CardHeader
@@ -248,6 +285,38 @@ export default function ShipmentWorkspace() {
               <div>
                 <strong>Status:</strong> <StatusPill value={selected.status} />
               </div>
+              {selected.status === "Exception" && (
+                <div style={{
+                  marginTop: "1rem",
+                  padding: "1rem",
+                  background: "var(--sapErrorBackground)",
+                  borderRadius: 8,
+                  border: "1px solid var(--sapErrorBorderColor)",
+                }}>
+                  <div style={{ fontWeight: 600, marginBottom: "0.75rem", color: "var(--sapCriticalColor)" }}>
+                    ⚠️ Exception Management
+                  </div>
+                  <FlexBox style={{ gap: "0.5rem" }}>
+                    <Button
+                      design="Positive"
+                      icon="accept"
+                      onClick={() => setApproveDialogOpen(true)}
+                      disabled={approveMutation.isPending}
+                    >
+                      Approve Exception
+                    </Button>
+                    <Button
+                      design="Negative"
+                      icon="decline"
+                      onClick={() => rejectMutation.mutate(selected.ID)}
+                      disabled={rejectMutation.isPending}
+                    >
+                      {rejectMutation.isPending ? "Rejecting…" : "Reject Exception"}
+                    </Button>
+                  </FlexBox>
+                </div>
+              )}
+
               <div style={{ marginTop: "1rem" }}>
                 <strong>Upload Invoice PDF:</strong>
                 <br />
@@ -346,6 +415,51 @@ export default function ShipmentWorkspace() {
               type="Number"
               placeholder="0"
               onInput={(e) => (formRef.current.totalWeight = e.target.value)}
+            />
+          </FormItem>
+        </Form>
+      </Dialog>
+
+      {/* Approve Exception Dialog */}
+      <Dialog
+        open={approveDialogOpen}
+        headerText="Approve Exception"
+        footer={
+          <Bar endContent={
+            <FlexBox style={{ gap: "0.5rem" }}>
+              <Button onClick={() => setApproveDialogOpen(false)}>Cancel</Button>
+              <Button
+                design="Positive"
+                disabled={approveMutation.isPending}
+                onClick={() => approveMutation.mutate({
+                  shipmentId: selected?.ID,
+                  purchaseOrderId: approveRef.current.poId || null,
+                  newDeliveryDate: approveRef.current.newDeliveryDate || new Date().toISOString(),
+                })}
+              >
+                {approveMutation.isPending ? "Approving…" : "Confirm Approve"}
+              </Button>
+            </FlexBox>
+          } />
+        }
+        onClose={() => setApproveDialogOpen(false)}
+      >
+        <Form style={{ padding: "1rem", minWidth: 380 }}>
+          <FormItem label={<Label>Shipment</Label>}>
+            <Input value={selected?.ID?.substring(0, 8) + "…"} readonly />
+          </FormItem>
+          <FormItem label={<Label>PO Number (optional)</Label>}>
+            <Input
+              placeholder="e.g. 4500000001"
+              onInput={(e) => (approveRef.current.poId = e.target.value)}
+            />
+          </FormItem>
+          <FormItem label={<Label>New Delivery Date</Label>}>
+            <Input
+              type="Date"
+              onInput={(e) =>
+                (approveRef.current.newDeliveryDate = e.target.value + "T00:00:00Z")
+              }
             />
           </FormItem>
         </Form>

@@ -153,48 +153,29 @@ module.exports = cds.service.impl(async function () {
         }
     });
 
-    // ─── MEDIA STREAM: Upload PDF Invoice ─────────────────────────────────
-    this.on('PUT', 'Shipments', async (req, next) => {
-        const contentType = req.headers?.['content-type'] || '';
-        if (!contentType.includes('application/pdf')) return next();
-
-        const shipmentId = req.params?.[0]?.ID || req.params?.[0];
-        console.log('[MediaStream] Receiving PDF for shipment:', shipmentId);
+    // ─── ACTION: Upload PDF Invoice (base64) ──────────────────────────────
+    // Dùng action thay vì OData media stream vì @odata.draft.enabled không
+    // compatible với PUT /entity/mediaProperty (trả 501)
+    this.on('uploadInvoicePdf', async (req) => {
+        const { shipmentId, content, fileName } = req.data;
+        console.log('[UploadInvoice] Shipment:', shipmentId, '| File:', fileName);
 
         try {
-            let pdfBuffer;
-            if (Buffer.isBuffer(req.data)) {
-                pdfBuffer = req.data;
-            } else if (typeof req.data === 'string') {
-                pdfBuffer = Buffer.from(req.data);
-            } else if (req.data?.pipe) {
-                const chunks = [];
-                await new Promise((resolve, reject) => {
-                    req.data.on('data', chunk => chunks.push(chunk));
-                    req.data.on('end', resolve);
-                    req.data.on('error', reject);
-                });
-                pdfBuffer = Buffer.concat(chunks);
-            } else {
-                pdfBuffer = Buffer.from(JSON.stringify(req.data));
-            }
-
-            console.log('[MediaStream] PDF size:', pdfBuffer.length, 'bytes');
+            const pdfBuffer = Buffer.from(content, 'base64');
+            console.log('[UploadInvoice] PDF size:', pdfBuffer.length, 'bytes');
 
             await UPDATE(Shipments)
-                .set({ invoiceScan: pdfBuffer })
+                .set({ invoiceScan: pdfBuffer, invoiceScan_mediaType: 'application/pdf' })
                 .where({ ID: shipmentId });
 
             // Mock AI/OCR extraction
-            await new Promise(resolve => setTimeout(resolve, 50));
             const ocrResult = {
                 trackingNumber: `TRK-${shipmentId?.substring(0, 8).toUpperCase()}`,
                 batchId:        `BATCH-${Date.now()}`,
                 extractedDate:  new Date().toISOString(),
                 confidence:     0.95,
-                source:         'mock-ai-ocr',
             };
-            console.log('[MediaStream] OCR result:', ocrResult);
+            console.log('[UploadInvoice] OCR result:', ocrResult);
 
             await INSERT.into(AuditLogs).entries({
                 entityName: 'Shipments',
@@ -202,12 +183,12 @@ module.exports = cds.service.impl(async function () {
                 action:     'INVOICE_UPLOADED',
                 changedBy:  req.user?.id || 'system',
                 changedAt:  new Date().toISOString(),
-                newValue:   JSON.stringify(ocrResult),
+                newValue:   JSON.stringify({ ...ocrResult, fileName }),
             });
 
             return ocrResult;
         } catch (err) {
-            console.error('[MediaStream] Error:', err.message);
+            console.error('[UploadInvoice] Error:', err.message);
             throw err;
         }
     });

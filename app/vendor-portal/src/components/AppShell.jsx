@@ -98,6 +98,12 @@ export default function AppShell({ children }) {
                 data-path="/price-ledger"
                 selected={location.pathname === "/price-ledger"}
               />
+              <SideNavigationItem
+                text="Audit Logs"
+                icon="document-text"
+                data-path="/audit-logs"
+                selected={location.pathname === "/audit-logs"}
+              />
             </SideNavigation>
           )}
         </aside>
