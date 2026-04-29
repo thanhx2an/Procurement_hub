@@ -1,10 +1,9 @@
 import axios from "axios";
 
-const BASE_URL =
-  import.meta.env.VITE_PROCUREMENT_BASE_URL ||
-  (import.meta.env.DEV
-    ? "/procurement"
-    : "https://1aae4b04trial-dev-poc2-procurement-hub-srv.cfapps.us10-001.hana.ondemand.com/procurement");
+// Luôn dùng relative URL để đi qua AppRouter (cả DEV lẫn production)
+// DEV: Vite proxy forward /procurement → localhost:4004
+// Production: AppRouter forward /procurement → poc2-procurement-hub-srv với JWT token
+const BASE_URL = import.meta.env.VITE_PROCUREMENT_BASE_URL || "/procurement";
 
 const api = axios.create({
   baseURL: BASE_URL,
@@ -51,8 +50,8 @@ export const uploadInvoice = async (id, file) => {
   });
   return data;
 };
-export const triggerCriticalDelay = async (shipmentId) => {
-  const { data } = await api.post("/criticalDelay", { shipmentId });
+export const triggerCriticalDelay = async (shipmentId, reason) => {
+  const { data } = await api.post("/criticalDelay", { shipmentId, reason });
   return data;
 };
 export const fetchPriceLedger = async () => {
