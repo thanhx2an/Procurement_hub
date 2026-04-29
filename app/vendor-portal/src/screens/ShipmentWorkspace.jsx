@@ -221,7 +221,7 @@ export default function ShipmentWorkspace() {
                   setExceptionDialogOpen(true);
                 }}
               >
-                Raise Exception
+                Flag Delay
               </Button>
             )}
             <Button
@@ -500,7 +500,7 @@ export default function ShipmentWorkspace() {
       {/* Raise Exception Dialog — Vendor */}
       <Dialog
         open={exceptionDialogOpen}
-        headerText="Raise Exception — Request Delivery Extension"
+        headerText="Flag Delay — Request Delivery Extension"
         footer={
           <Bar endContent={
             <FlexBox style={{ gap: "0.5rem" }}>
