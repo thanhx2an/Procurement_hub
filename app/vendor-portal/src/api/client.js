@@ -36,10 +36,10 @@ export const activateDraft = async (id) => {
   return data;
 };
 export const uploadInvoice = async (id, file) => {
-  // Convert file to base64 — OData media stream không work với draft-enabled entity (501)
+  // Convert to base64 — CAP backend sẽ upload lên Supabase sau khi check role
   const base64 = await new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(reader.result.split(',')[1]); // strip data:...;base64,
+    reader.onload = () => resolve(reader.result.split(',')[1]);
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
@@ -47,6 +47,7 @@ export const uploadInvoice = async (id, file) => {
     shipmentId: id,
     content: base64,
     fileName: file.name,
+    fileSize: file.size,
   });
   return data;
 };
@@ -70,8 +71,8 @@ export const fetchAuditLogs = async () => {
   const { data } = await api.get("/AuditLogs?$orderby=changedAt desc");
   return data.value;
 };
-export const approveException = async ({ shipmentId, purchaseOrderId, newDeliveryDate }) => {
-  const { data } = await api.post("/approveException", { shipmentId, purchaseOrderId, newDeliveryDate });
+export const approveException = async ({ shipmentId, newDeliveryDate }) => {
+  const { data } = await api.post("/approveException", { shipmentId, newDeliveryDate });
   return data;
 };
 export const rejectException = async (shipmentId) => {

@@ -87,10 +87,10 @@ service ProcurementService @(requires: 'authenticated-user') @(path: '/procureme
     action rejectException(shipmentId: UUID) returns String;
 
     @(requires: ['VendorUser', 'VendorAdmin', 'ProcurementManager'])
-    action uploadInvoicePdf(shipmentId: UUID, content: LargeString, fileName: String) returns {
+    action uploadInvoicePdf(shipmentId: UUID, content: LargeString, fileName: String, fileSize: Integer) returns {
         trackingNumber : String;
         batchId        : String;
         confidence     : Decimal;
-        extractedDate  : String;
+        storageUrl     : String;
     };
 }

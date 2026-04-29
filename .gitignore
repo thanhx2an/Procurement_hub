@@ -1,4 +1,5 @@
 # CAP poc2-procurement-hub
+.env
 _out
 *.db
 *.sqlite

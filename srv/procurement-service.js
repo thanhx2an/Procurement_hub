@@ -72,7 +72,7 @@ async function patchS4DeliveryDate(purchaseOrderId, newDeliveryDate) {
 }
 
 module.exports = cds.service.impl(async function () {
-    const { Shipments, AuditLogs, PriceLedger } = this.entities;
+    const { Shipments, AuditLogs, PriceLedger, AssetAttachments } = this.entities;
 
     // ─── Debug: log every request ─────────────────────────────────────────
     this.before('*', (req) => {
@@ -153,29 +153,63 @@ module.exports = cds.service.impl(async function () {
         }
     });
 
-    // ─── ACTION: Upload PDF Invoice (base64) ──────────────────────────────
-    // Dùng action thay vì OData media stream vì @odata.draft.enabled không
-    // compatible với PUT /entity/mediaProperty (trả 501)
+    // ─── ACTION: Upload PDF Invoice (server-side Supabase upload) ────────
+    // CAP check role trước, sau đó mới upload lên Supabase — anon key không lộ ra frontend
     this.on('uploadInvoicePdf', async (req) => {
-        const { shipmentId, content, fileName } = req.data;
-        console.log('[UploadInvoice] Shipment:', shipmentId, '| File:', fileName);
+        const { shipmentId, content, fileName, fileSize } = req.data;
+        console.log('[UploadInvoice] Shipment:', shipmentId, '| File:', fileName, '| User:', req.user?.id);
+
+        const SUPABASE_URL  = 'https://txdrpxbbeenefbeqexiv.supabase.co';
+        // service_role key — bypasses RLS, server-side only, never sent to browser
+        // Local: set in .env | BTP: cf set-env poc2-procurement-hub-srv SUPABASE_SERVICE_ROLE_KEY "..."
+        const SUPABASE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY
+            || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR4ZHJweGJiZWVuZWZiZXFleGl2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NzM0OTcwNiwiZXhwIjoyMDkyOTI1NzA2fQ.n7g-0mzfpy8GbBcj1P9OPSfDNFFI7vSd3WwXEms6nY4';
+        const BUCKET        = 'invoices';
 
         try {
-            const pdfBuffer = Buffer.from(content, 'base64');
-            console.log('[UploadInvoice] PDF size:', pdfBuffer.length, 'bytes');
+            // 1. Upload lên Supabase Storage via REST API
+            const filePath   = `shipments/${shipmentId}/${Date.now()}_${fileName}`;
+            const pdfBuffer  = Buffer.from(content, 'base64');
 
-            await UPDATE(Shipments)
-                .set({ invoiceScan: pdfBuffer, invoiceScan_mediaType: 'application/pdf' })
-                .where({ ID: shipmentId });
+            const uploadRes = await fetch(
+                `${SUPABASE_URL}/storage/v1/object/${BUCKET}/${filePath}`,
+                {
+                    method:  'POST',
+                    headers: {
+                        'Authorization': `Bearer ${SUPABASE_KEY}`,
+                        'Content-Type':  'application/pdf',
+                        'x-upsert':      'true',
+                    },
+                    body: pdfBuffer,
+                }
+            );
 
-            // Mock AI/OCR extraction
+            if (!uploadRes.ok) {
+                const err = await uploadRes.text();
+                throw new Error(`Supabase upload failed: ${uploadRes.status} ${err}`);
+            }
+
+            const storageUrl = `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${filePath}`;
+            console.log('[UploadInvoice] Uploaded to:', storageUrl);
+
+            // 2. Record metadata vào AssetAttachments
+            await INSERT.into(AssetAttachments).entries({
+                shipment_ID: shipmentId,
+                fileName,
+                mimeType:    'application/pdf',
+                storageUrl,
+                fileSize:    fileSize || pdfBuffer.length,
+                uploadedAt:  new Date().toISOString(),
+                uploadedBy:  req.user?.id || 'anonymous',
+            });
+
+            // 3. Mock AI/OCR
             const ocrResult = {
                 trackingNumber: `TRK-${shipmentId?.substring(0, 8).toUpperCase()}`,
                 batchId:        `BATCH-${Date.now()}`,
-                extractedDate:  new Date().toISOString(),
                 confidence:     0.95,
+                storageUrl,
             };
-            console.log('[UploadInvoice] OCR result:', ocrResult);
 
             await INSERT.into(AuditLogs).entries({
                 entityName: 'Shipments',
