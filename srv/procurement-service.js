@@ -79,6 +79,14 @@ module.exports = cds.service.impl(async function () {
         console.log('[Request]', req.method, req.entity, '| User:', req.user?.id, req.user?.roles);
     });
 
+    // ─── GET /me — trả về user hiện tại + roles ───────────────────────────
+    this.on('me', (req) => {
+        const user = req.user;
+        const roles = ['ProcurementManager', 'VendorUser', 'VendorAdmin', 'Auditor']
+            .filter(r => user.is(r));
+        return { id: user.id, roles };
+    });
+
     // ─── Vendors: live from S/4HANA API_BUSINESS_PARTNER ──────────────────
     this.on('READ', 'Vendors', async (req) => {
         try {
@@ -203,7 +211,12 @@ module.exports = cds.service.impl(async function () {
                 uploadedBy:  req.user?.id || 'anonymous',
             });
 
-            // 3. Mock AI/OCR
+            // 3. Cập nhật status → Shipped (invoice đã có = hàng đã gửi)
+            await UPDATE(Shipments)
+                .set({ status: 'Shipped' })
+                .where({ ID: shipmentId });
+
+            // 4. Mock AI/OCR
             const ocrResult = {
                 trackingNumber: `TRK-${shipmentId?.substring(0, 8).toUpperCase()}`,
                 batchId:        `BATCH-${Date.now()}`,
@@ -217,7 +230,7 @@ module.exports = cds.service.impl(async function () {
                 action:     'INVOICE_UPLOADED',
                 changedBy:  req.user?.id || 'system',
                 changedAt:  new Date().toISOString(),
-                newValue:   JSON.stringify({ ...ocrResult, fileName }),
+                newValue:   JSON.stringify({ ...ocrResult, fileName, status: 'Shipped' }),
             });
 
             return ocrResult;
@@ -272,15 +285,19 @@ module.exports = cds.service.impl(async function () {
     // ─── ACTION: criticalDelay — Vendor báo giao trễ ─────────────────────
     // Flow: status → Exception → ghi log → gửi email Manager qua Alert Notification
     this.on('criticalDelay', async (req) => {
-        const { shipmentId, reason } = req.data;
+        const { shipmentId, reason, proposedDeliveryDate } = req.data;
 
         // 1. Lấy thông tin shipment
         const shipment = await SELECT.one.from(Shipments).where({ ID: shipmentId });
         if (!shipment) return req.error(404, `Shipment ${shipmentId} not found`);
 
-        // 2. Cập nhật status + lý do trễ
+        // 2. Cập nhật status + lý do trễ + ngày đề xuất
         await UPDATE(Shipments)
-            .set({ status: 'Exception', delayReason: reason || 'No reason provided' })
+            .set({
+                status:               'Exception',
+                delayReason:          reason || 'No reason provided',
+                proposedDeliveryDate: proposedDeliveryDate || null,
+            })
             .where({ ID: shipmentId });
 
         // 3. Ghi audit log
@@ -290,14 +307,14 @@ module.exports = cds.service.impl(async function () {
             action:     'CRITICAL_DELAY_FLAGGED',
             changedBy:  req.user?.id || 'system',
             changedAt:  new Date().toISOString(),
-            newValue:   JSON.stringify({ status: 'Exception', reason }),
+            newValue:   JSON.stringify({ status: 'Exception', reason, proposedDeliveryDate }),
         });
 
         // 4. Gửi email thông báo Manager qua BTP Alert Notification
         await sendAlertNotification({
             shipmentId,
             subject: `⚠️ Critical Delay: Shipment ${shipmentId.substring(0, 8).toUpperCase()}`,
-            body:    `Vendor ${shipment.vendorCode} (${req.user?.id}) has flagged shipment ${shipmentId} as critically delayed.\n\nReason: ${reason || 'Not provided'}\n\nPlease review and approve or reject this exception in the Procurement Hub.`,
+            body:    `Vendor ${shipment.vendorCode} (${req.user?.id}) has flagged shipment ${shipmentId} as critically delayed.\n\nReason: ${reason || 'Not provided'}\nProposed new delivery date: ${proposedDeliveryDate || 'Not specified'}\n\nPlease review in the Procurement Hub.`,
             severity: 'WARNING',
         });
 

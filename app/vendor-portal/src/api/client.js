@@ -11,6 +11,10 @@ const api = axios.create({
   withCredentials: true,
 });
 
+export const fetchMe = async () => {
+  const { data } = await api.get("/me()");
+  return data;
+};
 export const fetchVendors = async () => {
   const { data } = await api.get("/Vendors");
   return data.value;
@@ -20,8 +24,14 @@ export const fetchProducts = async () => {
   return data.value;
 };
 export const fetchShipments = async () => {
-  const { data } = await api.get("/Shipments?$expand=items");
-  return data.value;
+  // Fetch active entities + new drafts (HasActiveEntity=false = draft chưa được submit)
+  const [activeRes, draftRes] = await Promise.all([
+    api.get("/Shipments?$expand=items"),
+    api.get("/Shipments?$filter=IsActiveEntity eq false and HasActiveEntity eq false&$expand=items"),
+  ]);
+  const active = activeRes.data.value || [];
+  const drafts = draftRes.data.value || [];
+  return [...active, ...drafts];
 };
 export const createShipment = async (payload) => {
   const { data } = await api.post("/Shipments", payload);
@@ -50,9 +60,12 @@ export const uploadInvoice = async (id, file) => {
   });
   return data;
 };
-export const triggerCriticalDelay = async (shipmentId, reason) => {
-  const { data } = await api.post("/criticalDelay", { shipmentId, reason });
+export const triggerCriticalDelay = async ({ shipmentId, reason, proposedDeliveryDate }) => {
+  const { data } = await api.post("/criticalDelay", { shipmentId, reason, proposedDeliveryDate });
   return data;
+};
+export const deleteDraft = async (id) => {
+  await api.delete(`/Shipments(ID=${id},IsActiveEntity=false)`);
 };
 export const fetchPriceLedger = async () => {
   const { data } = await api.get("/PriceLedger?$orderby=validFrom desc");

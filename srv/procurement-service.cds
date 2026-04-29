@@ -76,9 +76,15 @@ service ProcurementService @(requires: 'authenticated-user') @(path: '/procureme
     ])
     entity SupplierInvoices as projection on INV.A_SupplierInvoice;
 
+    // ─── Current user info ───
+    function me() returns {
+        id    : String;
+        roles : array of String;
+    };
+
     // ─── Actions ───
     @(requires: ['VendorUser', 'VendorAdmin', 'ProcurementManager'])
-    action criticalDelay(shipmentId: UUID, reason: String) returns String;
+    action criticalDelay(shipmentId: UUID, reason: String, proposedDeliveryDate: DateTime) returns String;
 
     @(requires: 'ProcurementManager')
     action approveException(shipmentId: UUID, newDeliveryDate: DateTime) returns String;

@@ -23,8 +23,9 @@ entity Shipments : cuid, managed {
                        } default 'Draft';
     deliveryDate     : DateTime;
     totalWeight      : Decimal(13,3);
-    purchaseOrderId  : String(10);
-    delayReason      : String(500);
+    purchaseOrderId       : String(10);
+    delayReason           : String(500);
+    proposedDeliveryDate  : DateTime;
     items            : Composition of many ShipmentItems on items.parent = $self;
     attachments      : Composition of many AssetAttachments on attachments.shipment = $self;
 

@@ -27,8 +27,11 @@ import {
   uploadInvoice,
   triggerCriticalDelay,
   fetchVendors,
+  fetchPurchaseOrders,
+  fetchMe,
   approveException,
   rejectException,
+  deleteDraft,
 } from "../api/client";
 
 const STATUS_STYLES = {
@@ -66,8 +69,11 @@ export default function ShipmentWorkspace() {
   const [ocrResult, setOcrResult] = useState(null);
   const [actionMsg, setActionMsg] = useState(null);
   const [approveDialogOpen, setApproveDialogOpen] = useState(false);
+  const [exceptionDialogOpen, setExceptionDialogOpen] = useState(false);
+  const [exceptionShipment, setExceptionShipment] = useState(null);
   const formRef = useRef({});
   const approveRef = useRef({});
+  const exceptionRef = useRef({});
 
   const { data: shipments = [], isLoading } = useQuery({
     queryKey: ["shipments"],
@@ -77,20 +83,40 @@ export default function ShipmentWorkspace() {
     queryKey: ["vendors"],
     queryFn: fetchVendors,
   });
+  const { data: purchaseOrders = [] } = useQuery({
+    queryKey: ["purchaseOrders"],
+    queryFn: fetchPurchaseOrders,
+  });
+  const { data: me = {} } = useQuery({
+    queryKey: ["me"],
+    queryFn: fetchMe,
+  });
+  const isManager = me.roles?.includes('ProcurementManager');
 
   const createMutation = useMutation({
-    mutationFn: async (payload) => {
-      const draft = await createShipment(payload);
-      return activateDraft(draft.ID);
-    },
+    mutationFn: createShipment,
     onSuccess: () => {
       queryClient.invalidateQueries(["shipments"]);
       setDialogOpen(false);
     },
   });
 
+  const submitDraftMutation = useMutation({
+    mutationFn: activateDraft,
+    onSuccess: () => queryClient.invalidateQueries(["shipments"]),
+  });
+
   const delayMutation = useMutation({
     mutationFn: triggerCriticalDelay,
+    onSuccess: () => {
+      queryClient.invalidateQueries(["shipments"]);
+      setExceptionDialogOpen(false);
+      setExceptionShipment(null);
+    },
+  });
+
+  const deleteDraftMutation = useMutation({
+    mutationFn: deleteDraft,
     onSuccess: () => queryClient.invalidateQueries(["shipments"]),
   });
 
@@ -157,26 +183,56 @@ export default function ShipmentWorkspace() {
     {
       Header: "Status",
       accessor: "status",
-      Cell: ({ value }) => <StatusPill value={value} />,
+      Cell: ({ value, row }) =>
+        row.original.IsActiveEntity === false
+          ? <StatusPill value="Draft" />
+          : <StatusPill value={value} />,
     },
     {
       Header: "Actions",
       id: "actions",
-      Cell: ({ row }) => (
-        <FlexBox style={{ gap: "0.5rem" }}>
-          <Button
-            design="Transparent"
-            icon="alert"
-            disabled={row.original.status === "Exception"}
-            onClick={() => delayMutation.mutate(row.original.ID)}
-          />
-          <Button
-            design="Transparent"
-            icon="detail-view"
-            onClick={() => setSelected(row.original)}
-          />
-        </FlexBox>
-      ),
+      Cell: ({ row }) => {
+        const isDraft = row.original.IsActiveEntity === false;
+        return (
+          <FlexBox style={{ gap: "0.5rem" }}>
+            {isDraft ? (
+              <>
+                <Button
+                  design="Emphasized"
+                  disabled={submitDraftMutation.isPending}
+                  onClick={() => submitDraftMutation.mutate(row.original.ID)}
+                >
+                  Activate
+                </Button>
+                <Button
+                  design="Negative"
+                  disabled={deleteDraftMutation.isPending}
+                  onClick={() => deleteDraftMutation.mutate(row.original.ID)}
+                >
+                  Delete
+                </Button>
+              </>
+            ) : (
+              <Button
+                design="Attention"
+                disabled={row.original.status === "Exception"}
+                onClick={() => {
+                  setExceptionShipment(row.original);
+                  setExceptionDialogOpen(true);
+                }}
+              >
+                Raise Exception
+              </Button>
+            )}
+            <Button
+              design="Transparent"
+              onClick={() => setSelected(row.original)}
+            >
+              Detail
+            </Button>
+          </FlexBox>
+        );
+      },
     },
   ];
 
@@ -286,7 +342,7 @@ export default function ShipmentWorkspace() {
               <div>
                 <strong>Status:</strong> <StatusPill value={selected.status} />
               </div>
-              {selected.status === "Exception" && (
+              {selected.status === "Exception" && isManager && (
                 <div style={{
                   marginTop: "1rem",
                   padding: "1rem",
@@ -321,12 +377,22 @@ export default function ShipmentWorkspace() {
               <div style={{ marginTop: "1rem" }}>
                 <strong>Upload Invoice PDF:</strong>
                 <br />
-                <input
-                  type="file"
-                  accept="application/pdf"
-                  style={{ marginTop: "0.5rem" }}
-                  onChange={(e) => handleFileUpload(e, selected.ID)}
-                />
+                {selected.IsActiveEntity === false ? (
+                  <MessageStrip
+                    design="Warning"
+                    hideCloseButton
+                    style={{ marginTop: "0.5rem" }}
+                  >
+                    Submit the shipment first before uploading an invoice.
+                  </MessageStrip>
+                ) : (
+                  <input
+                    type="file"
+                    accept="application/pdf"
+                    style={{ marginTop: "0.5rem" }}
+                    onChange={(e) => handleFileUpload(e, selected.ID)}
+                  />
+                )}
               </div>
               {ocrResult && (
                 <div
@@ -373,14 +439,15 @@ export default function ShipmentWorkspace() {
                         formRef.current.deliveryDate || `${new Date().getFullYear() + 1}-12-31T00:00:00Z`,
                       totalWeight: parseFloat(formRef.current.totalWeight) || 0,
                       vendor_ID: formRef.current.vendor_ID || null,
+                      purchaseOrderId: formRef.current.purchaseOrderId || null,
                       status: "Draft",
                     })
                   }
                   disabled={createMutation.isPending}
                 >
                   {createMutation.isPending
-                    ? "Creating..."
-                    : "Create & Activate"}
+                    ? "Saving..."
+                    : "Save Draft"}
                 </Button>
               </FlexBox>
             }
@@ -389,16 +456,20 @@ export default function ShipmentWorkspace() {
         onClose={() => setDialogOpen(false)}
       >
         <Form style={{ padding: "1rem", minWidth: 400 }}>
-          <FormItem label={<Label>Vendor</Label>}>
+          <FormItem label={<Label>Purchase Order</Label>}>
             <Select
-              onChange={(e) =>
-                (formRef.current.vendor_ID = e.detail.selectedOption.value)
-              }
+              onChange={(e) => {
+                const val = e.detail.selectedOption.value;
+                const po = purchaseOrders.find(p => p.PurchaseOrder === val);
+                formRef.current.purchaseOrderId = val;
+                // Auto-fill vendor from PO's Supplier field
+                if (po?.Supplier) formRef.current.vendor_ID = po.Supplier;
+              }}
             >
-              <Option value="">— Select Vendor —</Option>
-              {vendors.map((v) => (
-                <Option key={v.BusinessPartner} value={v.BusinessPartner}>
-                  {v.BusinessPartnerFullName} ({v.BusinessPartner})
+              <Option value="">— Select Purchase Order —</Option>
+              {purchaseOrders.map((po) => (
+                <Option key={po.PurchaseOrder} value={po.PurchaseOrder}>
+                  {po.PurchaseOrder} — {po.Supplier} ({po.DocumentCurrency})
                 </Option>
               ))}
             </Select>
@@ -426,7 +497,56 @@ export default function ShipmentWorkspace() {
         </Form>
       </Dialog>
 
-      {/* Approve Exception Dialog */}
+      {/* Raise Exception Dialog — Vendor */}
+      <Dialog
+        open={exceptionDialogOpen}
+        headerText="Raise Exception — Request Delivery Extension"
+        footer={
+          <Bar endContent={
+            <FlexBox style={{ gap: "0.5rem" }}>
+              <Button onClick={() => setExceptionDialogOpen(false)}>Cancel</Button>
+              <Button
+                design="Attention"
+                disabled={delayMutation.isPending}
+                onClick={() => delayMutation.mutate({
+                  shipmentId: exceptionShipment?.ID,
+                  reason: exceptionRef.current.reason || '',
+                  proposedDeliveryDate: exceptionRef.current.proposedDeliveryDate || null,
+                })}
+              >
+                {delayMutation.isPending ? "Submitting…" : "Submit Exception"}
+              </Button>
+            </FlexBox>
+          } />
+        }
+        onClose={() => setExceptionDialogOpen(false)}
+      >
+        <Form style={{ padding: "1rem", minWidth: 400 }}>
+          <FormItem label={<Label>Shipment</Label>}>
+            <Input value={exceptionShipment?.ID?.substring(0, 8) + "…"} readonly />
+          </FormItem>
+          <FormItem label={<Label>Reason for Delay</Label>}>
+            <Input
+              placeholder="e.g. Port congestion, customs hold..."
+              onInput={(e) => (exceptionRef.current.reason = e.target.value)}
+            />
+          </FormItem>
+          <FormItem label={<Label>Proposed New Delivery Date</Label>}>
+            <DatePicker
+              minDate={new Date().toLocaleDateString('en-US')}
+              onChange={(e) => {
+                const val = e.detail?.value;
+                if (val) {
+                  const [m, d, y] = val.split('/');
+                  exceptionRef.current.proposedDeliveryDate = `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}T00:00:00Z`;
+                }
+              }}
+            />
+          </FormItem>
+        </Form>
+      </Dialog>
+
+      {/* Approve Exception Dialog — Manager */}
       <Dialog
         open={approveDialogOpen}
         headerText="Approve Exception"
@@ -439,8 +559,9 @@ export default function ShipmentWorkspace() {
                 disabled={approveMutation.isPending}
                 onClick={() => approveMutation.mutate({
                   shipmentId: selected?.ID,
-                  purchaseOrderId: approveRef.current.poId || null,
-                  newDeliveryDate: approveRef.current.newDeliveryDate || new Date().toISOString(),
+                  newDeliveryDate: approveRef.current.newDeliveryDate
+                    || selected?.proposedDeliveryDate
+                    || new Date().toISOString(),
                 })}
               >
                 {approveMutation.isPending ? "Approving…" : "Confirm Approve"}
@@ -454,18 +575,30 @@ export default function ShipmentWorkspace() {
           <FormItem label={<Label>Shipment</Label>}>
             <Input value={selected?.ID?.substring(0, 8) + "…"} readonly />
           </FormItem>
-          <FormItem label={<Label>PO Number (optional)</Label>}>
+          <FormItem label={<Label>Vendor's Reason</Label>}>
+            <Input value={selected?.delayReason || "—"} readonly />
+          </FormItem>
+          <FormItem label={<Label>Vendor's Proposed Date</Label>}>
             <Input
-              placeholder="e.g. 4500000001"
-              onInput={(e) => (approveRef.current.poId = e.target.value)}
+              value={selected?.proposedDeliveryDate
+                ? new Date(selected.proposedDeliveryDate).toLocaleDateString()
+                : "Not specified"}
+              readonly
             />
           </FormItem>
-          <FormItem label={<Label>New Delivery Date</Label>}>
-            <Input
-              type="Date"
-              onInput={(e) =>
-                (approveRef.current.newDeliveryDate = e.target.value + "T00:00:00Z")
-              }
+          <FormItem label={<Label>New Delivery Date (modify if needed)</Label>}>
+            <DatePicker
+              minDate={new Date().toLocaleDateString('en-US')}
+              value={selected?.proposedDeliveryDate
+                ? new Date(selected.proposedDeliveryDate).toLocaleDateString('en-US')
+                : ''}
+              onChange={(e) => {
+                const val = e.detail?.value;
+                if (val) {
+                  const [m, d, y] = val.split('/');
+                  approveRef.current.newDeliveryDate = `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}T00:00:00Z`;
+                }
+              }}
             />
           </FormItem>
         </Form>
