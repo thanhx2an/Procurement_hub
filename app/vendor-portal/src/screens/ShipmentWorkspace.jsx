@@ -18,6 +18,7 @@ import {
   AnalyticalTable,
   Bar,
   Label,
+  DatePicker,
 } from "@ui5/webcomponents-react";
 import {
   fetchShipments,
@@ -369,7 +370,7 @@ export default function ShipmentWorkspace() {
                   onClick={() =>
                     createMutation.mutate({
                       deliveryDate:
-                        formRef.current.deliveryDate || "2026-12-31T00:00:00Z",
+                        formRef.current.deliveryDate || `${new Date().getFullYear() + 1}-12-31T00:00:00Z`,
                       totalWeight: parseFloat(formRef.current.totalWeight) || 0,
                       vendor_ID: formRef.current.vendor_ID || null,
                       status: "Draft",
@@ -403,11 +404,16 @@ export default function ShipmentWorkspace() {
             </Select>
           </FormItem>
           <FormItem label={<Label>Delivery Date</Label>}>
-            <Input
-              type="Date"
-              onInput={(e) =>
-                (formRef.current.deliveryDate = e.target.value + "T00:00:00Z")
-              }
+            <DatePicker
+              minDate={new Date().toLocaleDateString('en-US')}
+              onChange={(e) => {
+                const val = e.detail?.value;
+                if (val) {
+                  // DatePicker returns MM/DD/YYYY — convert to ISO
+                  const [m, d, y] = val.split('/');
+                  formRef.current.deliveryDate = `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}T00:00:00Z`;
+                }
+              }}
             />
           </FormItem>
           <FormItem label={<Label>Weight (kg)</Label>}>

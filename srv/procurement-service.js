@@ -227,6 +227,16 @@ module.exports = cds.service.impl(async function () {
         }
     });
 
+    // ─── AUTO-SET vendorCode khi Vendor tạo shipment ─────────────────────
+    // CDS restrict: 'vendorCode = $user.VendorID' — nếu không set thì CREATE fail
+    this.before('CREATE', 'Shipments', (req) => {
+        const user = req.user;
+        if (user.is('VendorUser') || user.is('VendorAdmin')) {
+            req.data.vendorCode = user.attr?.VendorID;
+            console.log('[CreateShipment] Auto-set vendorCode:', req.data.vendorCode);
+        }
+    });
+
     // ─── EARLY VALIDATION: Delivery date không được là quá khứ ───────────
     this.before('SAVE', 'Shipments', async (req) => {
         const { deliveryDate } = req.data;
