@@ -32,6 +32,8 @@ import {
   approveException,
   rejectException,
   deleteDraft,
+  fetchAttachments,
+  deleteAttachment,
 } from "../api/client";
 
 const STATUS_STYLES = {
@@ -74,6 +76,7 @@ export default function ShipmentWorkspace() {
   const formRef = useRef({});
   const approveRef = useRef({});
   const exceptionRef = useRef({});
+  const deliveryDatePickerRef = useRef(null);
 
   const { data: shipments = [], isLoading } = useQuery({
     queryKey: ["shipments"],
@@ -92,6 +95,9 @@ export default function ShipmentWorkspace() {
     queryFn: fetchMe,
   });
   const isManager = me.roles?.includes('ProcurementManager');
+  const visibleShipments = isManager
+    ? shipments.filter((s) => s.IsActiveEntity !== false)
+    : shipments;
 
   const createMutation = useMutation({
     mutationFn: createShipment,
@@ -141,6 +147,23 @@ export default function ShipmentWorkspace() {
       setTimeout(() => setActionMsg(null), 4000);
     },
     onError: (err) => setActionMsg({ type: "Negative", text: `Reject failed: ${err.message}` }),
+  });
+
+  const isActiveShipment = selected && selected.IsActiveEntity !== false;
+  const { data: attachments = [], isLoading: attachmentsLoading } = useQuery({
+    queryKey: ["attachments", selected?.ID],
+    queryFn: () => fetchAttachments(selected.ID),
+    enabled: !!isActiveShipment,
+  });
+
+  const deleteAttachmentMutation = useMutation({
+    mutationFn: deleteAttachment,
+    onSuccess: () => {
+      queryClient.invalidateQueries(["attachments", selected?.ID]);
+      setActionMsg({ type: "Positive", text: "🗑️ PDF deleted successfully." });
+      setTimeout(() => setActionMsg(null), 3000);
+    },
+    onError: (err) => setActionMsg({ type: "Negative", text: `Delete failed: ${err.message}` }),
   });
 
   const handleFileUpload = async (e, shipmentId) => {
@@ -299,7 +322,7 @@ export default function ShipmentWorkspace() {
             </div>
           ) : (
             <AnalyticalTable
-              data={shipments}
+              data={visibleShipments}
               columns={columns}
               visibleRows={10}
               filterable
@@ -418,6 +441,69 @@ export default function ShipmentWorkspace() {
                   </div>
                 </div>
               )}
+
+              {/* ── PDF Attachment List ── */}
+              {isActiveShipment && (
+                <div style={{ marginTop: "1.25rem" }}>
+                  <strong>📎 Uploaded Invoices:</strong>
+                  {attachmentsLoading ? (
+                    <div style={{ marginTop: "0.5rem", color: "var(--sapContent_LabelColor)" }}>
+                      Loading…
+                    </div>
+                  ) : attachments.length === 0 ? (
+                    <div style={{
+                      marginTop: "0.5rem",
+                      padding: "0.75rem",
+                      background: "var(--sapNeutralBackground)",
+                      borderRadius: 6,
+                      color: "var(--sapContent_LabelColor)",
+                      fontSize: "0.875rem",
+                    }}>
+                      No invoices uploaded yet.
+                    </div>
+                  ) : (
+                    <div style={{ marginTop: "0.5rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                      {attachments.map((att) => (
+                        <div key={att.ID} style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          padding: "0.6rem 0.75rem",
+                          background: "var(--sapNeutralBackground)",
+                          borderRadius: 6,
+                          border: "1px solid var(--sapNeutralBorderColor)",
+                        }}>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                            <a
+                              href={att.storageUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{ fontWeight: 600, fontSize: "0.875rem", color: "var(--sapLinkColor)" }}
+                            >
+                              📄 {att.fileName}
+                            </a>
+                            <span style={{ fontSize: "0.75rem", color: "var(--sapContent_LabelColor)" }}>
+                              {att.uploadedAt ? new Date(att.uploadedAt).toLocaleString() : "—"}
+                              {att.fileSize ? ` · ${(att.fileSize / 1024).toFixed(1)} KB` : ""}
+                              {att.uploadedBy ? ` · by ${att.uploadedBy}` : ""}
+                            </span>
+                          </div>
+                          <Button
+                            design="Negative"
+                            icon="delete"
+                            disabled={deleteAttachmentMutation.isPending}
+                            onClick={() => {
+                              if (window.confirm(`Delete "${att.fileName}"?`)) {
+                                deleteAttachmentMutation.mutate(att.ID);
+                              }
+                            }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </Card>
         )}
@@ -433,16 +519,29 @@ export default function ShipmentWorkspace() {
                 <Button onClick={() => setDialogOpen(false)}>Cancel</Button>
                 <Button
                   design="Emphasized"
-                  onClick={() =>
+                  onClick={() => {
+                    // Fallback: đọc trực tiếp từ DOM nếu onChange chưa fire
+                    if (!formRef.current.deliveryDate) {
+                      const raw = deliveryDatePickerRef.current?.value;
+                      if (raw) {
+                        const parsed = new Date(raw);
+                        if (!isNaN(parsed)) {
+                          formRef.current.deliveryDate = parsed.toISOString().split('T')[0] + 'T00:00:00Z';
+                        }
+                      }
+                    }
+                    if (!formRef.current.deliveryDate) {
+                      alert("Please select a delivery date.");
+                      return;
+                    }
                     createMutation.mutate({
-                      deliveryDate:
-                        formRef.current.deliveryDate || `${new Date().getFullYear() + 1}-12-31T00:00:00Z`,
+                      deliveryDate: formRef.current.deliveryDate,
                       totalWeight: parseFloat(formRef.current.totalWeight) || 0,
                       vendor_ID: formRef.current.vendor_ID || null,
                       purchaseOrderId: formRef.current.purchaseOrderId || null,
                       status: "Draft",
                     })
-                  }
+                  }}
                   disabled={createMutation.isPending}
                 >
                   {createMutation.isPending
@@ -453,7 +552,7 @@ export default function ShipmentWorkspace() {
             }
           />
         }
-        onClose={() => setDialogOpen(false)}
+        onClose={() => { setDialogOpen(false); formRef.current = {}; }}
       >
         <Form style={{ padding: "1rem", minWidth: 400 }}>
           <FormItem label={<Label>Purchase Order</Label>}>
@@ -476,13 +575,15 @@ export default function ShipmentWorkspace() {
           </FormItem>
           <FormItem label={<Label>Delivery Date</Label>}>
             <DatePicker
+              ref={deliveryDatePickerRef}
               minDate={new Date().toLocaleDateString('en-US')}
               onChange={(e) => {
-                const val = e.detail?.value;
+                const val = e.detail?.value || e.target?.value;
                 if (val) {
-                  // DatePicker returns MM/DD/YYYY — convert to ISO
                   const [m, d, y] = val.split('/');
-                  formRef.current.deliveryDate = `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}T00:00:00Z`;
+                  if (y && m && d) {
+                    formRef.current.deliveryDate = `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}T00:00:00Z`;
+                  }
                 }
               }}
             />

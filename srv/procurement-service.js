@@ -240,6 +240,21 @@ module.exports = cds.service.impl(async function () {
         }
     });
 
+    // ─── SAU KHI CREATE active Shipment: status → Pending ───────────────
+    // after('CREATE', 'Shipments') fire khi draftActivate copy sang main table
+    // (draft creation đi qua 'Shipments.drafts' nên không bị ảnh hưởng)
+    this.after('CREATE', 'Shipments', async (data, req) => {
+        const id = data?.ID;
+        if (!id) return;
+        const db = await cds.connect.to('db');
+        await db.run(
+            UPDATE('hub.procurement.Shipments')
+                .set({ status: 'Pending' })
+                .where({ ID: id })
+        );
+        console.log('[CREATE active] status → Pending for', id);
+    });
+
     // ─── AUTO-SET vendorCode khi Vendor tạo shipment ─────────────────────
     // CDS restrict: 'vendorCode = $user.VendorID' — nếu không set thì CREATE fail
     this.before('CREATE', 'Shipments', (req) => {
@@ -358,6 +373,40 @@ module.exports = cds.service.impl(async function () {
         });
 
         return `Exception approved. Shipment ${shipmentId} status set to Shipped. New delivery date: ${approvedDate}.`;
+    });
+
+    // ─── BEFORE DELETE AssetAttachment: xóa file khỏi Supabase trước ───────
+    this.before('DELETE', 'AssetAttachments', async (req) => {
+        const id = req.params?.[0]?.ID ?? req.params?.[0];
+        if (!id) return;
+        try {
+            const attachment = await SELECT.one.from(AssetAttachments).where({ ID: id });
+            if (!attachment?.storageUrl) return;
+
+            // storageUrl format: .../storage/v1/object/public/invoices/shipments/...
+            const marker = '/storage/v1/object/public/invoices/';
+            const idx = attachment.storageUrl.indexOf(marker);
+            if (idx === -1) return;
+            const filePath = attachment.storageUrl.slice(idx + marker.length);
+
+            const SUPABASE_URL = 'https://txdrpxbbeenefbeqexiv.supabase.co';
+            const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
+                || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR4ZHJweGJiZWVuZWZiZXFleGl2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NzM0OTcwNiwiZXhwIjoyMDkyOTI1NzA2fQ.n7g-0mzfpy8GbBcj1P9OPSfDNFFI7vSd3WwXEms6nY4';
+
+            const delRes = await fetch(`${SUPABASE_URL}/storage/v1/object/invoices`, {
+                method:  'DELETE',
+                headers: { 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json' },
+                body:    JSON.stringify({ prefixes: [filePath] }),
+            });
+            if (!delRes.ok) {
+                console.error('[DeleteAttachment] Supabase error:', await delRes.text());
+            } else {
+                console.log('[DeleteAttachment] Deleted from Supabase:', filePath);
+            }
+        } catch (err) {
+            // Không throw — vẫn để DB record bị xóa
+            console.error('[DeleteAttachment] Error:', err.message);
+        }
     });
 
     // ─── ACTION: rejectException — Manager từ chối, vendor phải giữ ngày ─

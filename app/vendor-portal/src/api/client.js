@@ -67,6 +67,15 @@ export const triggerCriticalDelay = async ({ shipmentId, reason, proposedDeliver
 export const deleteDraft = async (id) => {
   await api.delete(`/Shipments(ID=${id},IsActiveEntity=false)`);
 };
+export const fetchAttachments = async (shipmentId) => {
+  const { data } = await api.get(
+    `/AssetAttachments?$filter=shipment_ID eq ${shipmentId}&$orderby=uploadedAt desc`
+  );
+  return data.value;
+};
+export const deleteAttachment = async (id) => {
+  await api.delete(`/AssetAttachments(ID=${id})`);
+};
 export const fetchPriceLedger = async () => {
   const { data } = await api.get("/PriceLedger?$orderby=validFrom desc");
   return data.value;

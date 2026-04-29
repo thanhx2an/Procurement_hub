@@ -88,6 +88,10 @@
       "body-parser": {
         "limit": "20mb"
       }
+    },
+
+    "fiori": {
+      "bypass_draft": true
     }
   }
 }
