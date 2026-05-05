@@ -1,11 +1,11 @@
 _schema-version: "3.1"
-ID: poc2-procurement-hub
+ID: baongoc-procurement-hub-app
 version: 1.0.0
 description: Multi-Vendor Collaborative Procurement & Logistics Hub
 
 modules:
   # ─── CAP Backend ───
-  - name: poc2-procurement-hub-srv
+  - name: baongoc-procurement-hub-srv
     type: nodejs
     path: gen/srv
     parameters:
@@ -19,28 +19,29 @@ modules:
         properties:
           srv-url: ${default-url}
     requires:
-      - name: poc2-auth
-      - name: poc2-db
-      - name: poc2-destination
+      - name: baongoc-auth
+      - name: baongoc-db
+      - name: baongoc-destination
       - name: vendor-portal-api
         group: destinations
         properties:
           name: vendor-portal
           url: ~{url}
           forwardAuthToken: false
-      - name: poc2-connectivity
+      - name: baongoc-connectivity
+      - name: POC2_alertNotification
 
   # ─── HANA DB Deployer ───
-  - name: poc2-procurement-hub-db-deployer
+  - name: baongoc-procurement-hub-db-deployer
     type: hdb
     path: gen/db
     parameters:
       buildpack: nodejs_buildpack
     requires:
-      - name: poc2-db
+      - name: baongoc-db
 
   # ─── React Frontend ───
-  - name: poc2-vendor-portal
+  - name: baongoc-vendor-portal
     type: nodejs
     path: app/vendor-portal
     provides:
@@ -58,7 +59,7 @@ modules:
       disk-quota: 512M
       memory: 128M
     requires:
-      - name: poc2-auth
+      - name: baongoc-auth
       - name: srv-api
         group: destinations
         properties:
@@ -67,17 +68,17 @@ modules:
           forwardAuthToken: true
 
   # AppRouter
-  - name: poc2-approuter
+  - name: baongoc-approuter
     type: approuter.nodejs
     path: approuter
     parameters:
       disk-quota: 256M
       memory: 256M
     properties:
-      TENANT_HOST_PATTERN: "^(.*)-dev-poc2-approuter.cfapps.us10-001.hana.ondemand.com"
-      UAA_SERVICE_NAME: poc2-auth
+      TENANT_HOST_PATTERN: "^(.*)-dev-baongoc-approuter.cfapps.us10-001.hana.ondemand.com"
+      UAA_SERVICE_NAME: baongoc-auth
     requires:
-      - name: poc2-auth
+      - name: baongoc-auth
       - name: srv-api
         group: destinations
         properties:
@@ -92,43 +93,43 @@ modules:
           url: ~{url}
           forwardAuthToken: false
 
-      - name: poc2-destination
+      - name: baongoc-destination
 
 resources:
   # ─── XSUAA ───
-  - name: poc2-auth
+  - name: baongoc-auth
     type: org.cloudfoundry.managed-service
     parameters:
       service: xsuaa
       service-plan: application
-      service-name: poc2-auth
+      service-name: baongoc-auth
       path: ./xs-security.json
 
   # ─── HANA Cloud ───
-  - name: poc2-db
+  - name: baongoc-db
     type: org.cloudfoundry.managed-service
     parameters:
       service: hana
       service-plan: hdi-shared
-      service-name: poc2-db
+      service-name: baongoc-db
 
   # ─── Destination Service ───
-  - name: poc2-destination
+  - name: baongoc-destination
     type: org.cloudfoundry.managed-service
     parameters:
       service: destination
       service-plan: lite
-      service-name: poc2-destination
+      service-name: baongoc-destination
 
   # ─── Connectivity ───
-  - name: poc2-connectivity
+  - name: baongoc-connectivity
     type: org.cloudfoundry.managed-service
     parameters:
       service: connectivity
       service-plan: lite
-      service-name: poc2-connectivity
+      service-name: baongoc-connectivity
 
-  - name: POC2_alertNotification  
+  - name: POC2_alertNotification
     type: org.cloudfoundry.existing-service
 
 

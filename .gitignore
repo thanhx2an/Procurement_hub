@@ -19,8 +19,13 @@ target/
 *.mtar
 mta_archives/
 
+# Build outputs
+app/vendor-portal/dist/
+app/vendor-portal/deploy/
+
 # Other
 .DS_Store
+.fuse_hidden*
 *.orig
 *.log
 

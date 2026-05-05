@@ -9,6 +9,7 @@ const Dashboard         = lazy(() => import('./screens/Dashboard'));
 const ShipmentWorkspace = lazy(() => import('./screens/ShipmentWorkspace'));
 const PriceLedger       = lazy(() => import('./screens/PriceLedger'));
 const AuditLogs         = lazy(() => import('./screens/AuditLogs'));
+const Contacts          = lazy(() => import('./screens/Contacts'));
 
 function ScreenLoader() {
   return (
@@ -35,6 +36,7 @@ export default function App() {
                 <Route path="/shipments"    element={<ShipmentWorkspace />} />
                 <Route path="/price-ledger" element={<PriceLedger />} />
                 <Route path="/audit-logs"   element={<AuditLogs />} />
+                <Route path="/contacts"     element={<Contacts />} />
               </Routes>
             </Suspense>
           </AppShell>

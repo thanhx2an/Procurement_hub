@@ -19,6 +19,7 @@ import {
   Bar,
   Label,
   DatePicker,
+  Toast,
 } from "@ui5/webcomponents-react";
 import {
   fetchShipments,
@@ -28,12 +29,17 @@ import {
   triggerCriticalDelay,
   fetchVendors,
   fetchPurchaseOrders,
+  fetchPOItems,
   fetchMe,
   approveException,
   rejectException,
+  confirmDelivery,
+  markAsShipped,
   deleteDraft,
   fetchAttachments,
   deleteAttachment,
+  flagNotReceived,
+  reconfirmDelivery,
 } from "../api/client";
 
 const STATUS_STYLES = {
@@ -42,6 +48,15 @@ const STATUS_STYLES = {
   Shipped: { bg: "#e8f7f5", fg: "#0f766e" },
   Delivered: { bg: "#edf8e9", fg: "#256f3a" },
   Exception: { bg: "#fbeaea", fg: "#aa0808" },
+};
+
+const isOverdue = (shipment) => {
+  if (shipment.status !== 'Shipped' || !shipment.deliveryDate) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const delivery = new Date(shipment.deliveryDate);
+  delivery.setHours(0, 0, 0, 0);
+  return delivery < today;
 };
 
 function StatusPill({ value }) {
@@ -73,12 +88,25 @@ export default function ShipmentWorkspace() {
   const [approveDialogOpen, setApproveDialogOpen] = useState(false);
   const [exceptionDialogOpen, setExceptionDialogOpen] = useState(false);
   const [exceptionShipment, setExceptionShipment] = useState(null);
+  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+  const [notReceivedDialogOpen, setNotReceivedDialogOpen] = useState(false);
+  const notReceivedRef = useRef({});
+  const confirmRef = useRef({});
+  const confirmDatePickerRef = useRef(null);
+  // New Shipment form state
+  const [poItems, setPoItems] = useState([]);
+  const [poItemsLoading, setPoItemsLoading] = useState(false);
+  const [shipQtys, setShipQtys] = useState({});   // { poItem: qty }
+  const todayISO = () => new Date().toISOString().split('T')[0] + 'T00:00:00Z';
+  const [newForm, setNewForm] = useState({ purchaseOrderId: '', deliveryDate: todayISO(), deliveryAddress: '', notes: '', totalWeight: '' });
   const formRef = useRef({});
   const approveRef = useRef({});
   const exceptionRef = useRef({});
   const deliveryDatePickerRef = useRef(null);
   const approveDatePickerRef = useRef(null);
   const exceptionDatePickerRef = useRef(null);
+  const toastRef = useRef(null);
+  const [toastMsg, setToastMsg] = useState("");
 
   const { data: shipments = [], isLoading } = useQuery({
     queryKey: ["shipments"],
@@ -106,12 +134,23 @@ export default function ShipmentWorkspace() {
     onSuccess: () => {
       queryClient.invalidateQueries(["shipments"]);
       setDialogOpen(false);
+      setPoItems([]);
+      setShipQtys({});
+      setNewForm({ purchaseOrderId: '', deliveryDate: todayISO(), deliveryAddress: '', notes: '', totalWeight: '' });
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.error?.message || err.message || 'Unknown error';
+      setActionMsg({ type: 'Negative', text: `❌ Create failed: ${msg}` });
     },
   });
 
   const submitDraftMutation = useMutation({
     mutationFn: activateDraft,
     onSuccess: () => queryClient.invalidateQueries(["shipments"]),
+    onError: (err) => {
+      const msg = err?.response?.data?.error?.message || err.message || 'Unknown error';
+      setActionMsg({ type: 'Negative', text: `❌ Activate failed: ${msg}` });
+    },
   });
 
   const delayMutation = useMutation({
@@ -151,6 +190,52 @@ export default function ShipmentWorkspace() {
     onError: (err) => setActionMsg({ type: "Negative", text: `Reject failed: ${err.message}` }),
   });
 
+  const confirmMutation = useMutation({
+    mutationFn: confirmDelivery,
+    onSuccess: () => {
+      queryClient.invalidateQueries(["shipments"]);
+      setConfirmDialogOpen(false);
+      setActionMsg({ type: "Positive", text: "✅ Delivery confirmed — shipment marked as Delivered." });
+      setSelected((prev) => prev ? { ...prev, status: "Delivered" } : prev);
+      setTimeout(() => setActionMsg(null), 4000);
+    },
+    onError: (err) => setActionMsg({ type: "Negative", text: `Confirm failed: ${err?.response?.data?.error?.message || err.message}` }),
+  });
+
+  const flagNotReceivedMutation = useMutation({
+    mutationFn: flagNotReceived,
+    onSuccess: () => {
+      queryClient.invalidateQueries(["shipments"]);
+      setNotReceivedDialogOpen(false);
+      setSelected((prev) => prev ? { ...prev, status: "Exception", exceptionType: "NOT_RECEIVED" } : prev);
+      setActionMsg({ type: "Warning", text: "⚠️ Flagged as not received — vendor will be notified." });
+      setTimeout(() => setActionMsg(null), 4000);
+    },
+    onError: (err) => setActionMsg({ type: "Negative", text: `Failed: ${err?.response?.data?.error?.message || err.message}` }),
+  });
+
+  const reconfirmMutation = useMutation({
+    mutationFn: reconfirmDelivery,
+    onSuccess: () => {
+      queryClient.invalidateQueries(["shipments"]);
+      setSelected((prev) => prev ? { ...prev, status: "Delivered", exceptionType: null } : prev);
+      setActionMsg({ type: "Positive", text: "✅ Delivery reconfirmed — shipment marked as Delivered." });
+      setTimeout(() => setActionMsg(null), 4000);
+    },
+    onError: (err) => setActionMsg({ type: "Negative", text: `Failed: ${err?.response?.data?.error?.message || err.message}` }),
+  });
+
+  const markShippedMutation = useMutation({
+    mutationFn: markAsShipped,
+    onSuccess: () => {
+      queryClient.invalidateQueries(["shipments"]);
+      setSelected((prev) => prev ? { ...prev, status: "Shipped" } : prev);
+      setToastMsg("✅ Shipment marked as Shipped! The procurement team has been notified.");
+      toastRef.current?.show?.() ?? toastRef.current?.getDomRef()?.show?.();
+    },
+    onError: (err) => setActionMsg({ type: "Negative", text: `Failed: ${err?.response?.data?.error?.message || err.message}` }),
+  });
+
   const isActiveShipment = selected && selected.IsActiveEntity !== false;
   const { data: attachments = [], isLoading: attachmentsLoading } = useQuery({
     queryKey: ["attachments", selected?.ID],
@@ -188,15 +273,59 @@ export default function ShipmentWorkspace() {
     }
   };
 
+  const handlePOSelect = async (poId) => {
+    setNewForm(f => ({ ...f, purchaseOrderId: poId }));
+    setPoItems([]);
+    setShipQtys({});
+    if (!poId) return;
+    setPoItemsLoading(true);
+    try {
+      const items = await fetchPOItems(poId);
+      setPoItems(items);
+      // Default: ship 100% of each item
+      const qtys = {};
+      items.forEach(i => { qtys[i.purchaseOrderItem] = i.orderQuantity; });
+      setShipQtys(qtys);
+    } catch (e) {
+      setActionMsg({ type: 'Negative', text: `Failed to load PO items: ${e.message}` });
+    } finally {
+      setPoItemsLoading(false);
+    }
+  };
+
+  const handleCreateShipment = () => {
+    if (!newForm.deliveryDate) { alert('Please select a delivery date.'); return; }
+    const items = poItems.map(i => ({
+      materialId:      i.material,
+      materialDesc:    i.materialDesc,
+      quantity:        parseFloat(shipQtys[i.purchaseOrderItem]) || 0,
+      orderedQuantity: i.orderQuantity,
+      unit:            i.unit,
+      negotiatedPrice: i.netPriceAmount || 0,
+      poItem:          i.purchaseOrderItem,
+    }));
+    createMutation.mutate({
+      deliveryDate:     newForm.deliveryDate,
+      totalWeight:      parseFloat(newForm.totalWeight) || 0,
+      // vendor_ID và vendorCode được backend auto-set từ JWT (VendorID attribute)
+      // Không gửi me?.id vì đó là BTP login name, không phải Vendor UUID
+      purchaseOrderId:  newForm.purchaseOrderId || null,
+      deliveryAddress:  newForm.deliveryAddress || null,
+      notes:            newForm.notes || null,
+      status:           'Draft',
+      items,
+    });
+  };
+
   const columns = [
     {
-      Header: "ID",
-      accessor: "ID",
-      Cell: ({ value }) => value?.substring(0, 8) + "...",
+      Header: "Shipment #",
+      accessor: "shipmentNumber",
+      Cell: ({ value, row }) => value || row.original.ID?.substring(0, 8) + "…",
     },
     {
       Header: "Vendor",
-      accessor: "vendor_ID",
+      accessor: "vendorCode",
       Cell: ({ value }) => value || "—",
     },
     {
@@ -209,49 +338,73 @@ export default function ShipmentWorkspace() {
       Header: "Status",
       accessor: "status",
       Cell: ({ value, row }) =>
-        row.original.IsActiveEntity === false
-          ? <StatusPill value="Draft" />
-          : <StatusPill value={value} />,
+        row.original.IsActiveEntity === false ? (
+          <StatusPill value="Draft" />
+        ) : (
+          <FlexBox style={{ gap: '0.4rem', alignItems: 'center' }}>
+            <StatusPill value={value} />
+            {isOverdue(row.original) && (
+              <span style={{
+                fontSize: '0.7rem', fontWeight: 700,
+                background: '#fbeaea', color: '#aa0808',
+                padding: '0.1rem 0.4rem', borderRadius: 999,
+                border: '1px solid #f5c0c0',
+              }}>
+                OVERDUE
+              </span>
+            )}
+          </FlexBox>
+        ),
     },
     {
       Header: "Actions",
       id: "actions",
       Cell: ({ row }) => {
         const isDraft = row.original.IsActiveEntity === false;
+        const s = row.original;
         return (
-          <FlexBox style={{ gap: "0.5rem" }}>
+          <FlexBox style={{ gap: "0.5rem", flexWrap: "wrap" }}>
             {isDraft ? (
               <>
                 <Button
                   design="Emphasized"
                   disabled={submitDraftMutation.isPending}
-                  onClick={() => submitDraftMutation.mutate(row.original.ID)}
+                  onClick={() => submitDraftMutation.mutate(s.ID)}
                 >
                   Activate
                 </Button>
                 <Button
                   design="Negative"
                   disabled={deleteDraftMutation.isPending}
-                  onClick={() => deleteDraftMutation.mutate(row.original.ID)}
+                  onClick={() => deleteDraftMutation.mutate(s.ID)}
                 >
                   Delete
                 </Button>
               </>
             ) : (
-              <Button
-                design="Attention"
-                disabled={row.original.status === "Exception"}
-                onClick={() => {
-                  setExceptionShipment(row.original);
-                  setExceptionDialogOpen(true);
-                }}
-              >
-                Flag Delay
-              </Button>
+              <>
+                {/* Vendor: Flag Delay — chỉ khi chưa Delivered/Exception */}
+                {!isManager && (
+                  <Button
+                    design="Attention"
+                    disabled={s.status === "Exception" || s.status === "Delivered"}
+                    onClick={() => {
+                      setExceptionShipment(s);
+                      const existingDate = s.deliveryDate ? new Date(s.deliveryDate) : new Date();
+                      exceptionRef.current = {
+                        proposedDeliveryDate: existingDate.toISOString().split('T')[0] + 'T00:00:00Z',
+                      };
+                      setExceptionDialogOpen(true);
+                    }}
+                  >
+                    Flag Delay
+                  </Button>
+                )}
+              </>
             )}
             <Button
               design="Transparent"
-              onClick={() => setSelected(row.original)}
+              onClick={() => setSelected(s)}
             >
               Detail
             </Button>
@@ -277,13 +430,15 @@ export default function ShipmentWorkspace() {
           style={{ justifyContent: "space-between", alignItems: "center" }}
         >
           <Title level="H2">Shipment Workspace</Title>
-          <Button
-            design="Emphasized"
-            icon="add"
-            onClick={() => setDialogOpen(true)}
-          >
-            New Shipment
-          </Button>
+          {!isManager && (
+            <Button
+              design="Emphasized"
+              icon="add"
+              onClick={() => setDialogOpen(true)}
+            >
+              New Shipment
+            </Button>
+          )}
         </FlexBox>
 
         {uploadMsg && (
@@ -337,7 +492,7 @@ export default function ShipmentWorkspace() {
           <Card
             header={
               <CardHeader
-                titleText={`Detail — ${selected.ID?.substring(0, 8)}`}
+                titleText={`Detail — ${selected.shipmentNumber || selected.ID?.substring(0, 8)}`}
                 action={
                   <Button
                     design="Transparent"
@@ -352,21 +507,59 @@ export default function ShipmentWorkspace() {
             }
           >
             <div style={{ padding: "1rem" }}>
-              <div>
-                <strong>Vendor:</strong> {selected.vendor_ID || "—"}
+              {/* ── Basic Info ── */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem 1.5rem', marginBottom: '0.75rem' }}>
+                <div><strong>Vendor:</strong> {selected.vendorCode || "—"}</div>
+                <div><strong>Status:</strong> <StatusPill value={selected.status} /></div>
+                <div><strong>Delivery:</strong>{" "}{selected.deliveryDate ? new Date(selected.deliveryDate).toLocaleDateString() : "—"}</div>
+                <div><strong>Weight:</strong> {selected.totalWeight ?? "—"} kg</div>
+                {selected.purchaseOrderId && (
+                  <div><strong>PO#:</strong> {selected.purchaseOrderId}</div>
+                )}
+                {selected.deliveryAddress && (
+                  <div style={{ gridColumn: '1 / -1' }}><strong>Delivery Address:</strong> {selected.deliveryAddress}</div>
+                )}
+                {selected.notes && (
+                  <div style={{ gridColumn: '1 / -1' }}><strong>Notes:</strong> {selected.notes}</div>
+                )}
+                {selected.status === 'Exception' && selected.delayReason && (
+                  <div style={{ gridColumn: '1 / -1' }}><strong>Delay Reason:</strong> {selected.delayReason}</div>
+                )}
+                {selected.status === 'Exception' && selected.proposedDeliveryDate && (
+                  <div><strong>Proposed Date:</strong> {new Date(selected.proposedDeliveryDate).toLocaleDateString()}</div>
+                )}
               </div>
-              <div>
-                <strong>Delivery:</strong>{" "}
-                {selected.deliveryDate
-                  ? new Date(selected.deliveryDate).toLocaleDateString()
-                  : "—"}
-              </div>
-              <div>
-                <strong>Weight:</strong> {selected.totalWeight} kg
-              </div>
-              <div>
-                <strong>Status:</strong> <StatusPill value={selected.status} />
-              </div>
+
+              {/* ── Shipment Items ── */}
+              {selected.items?.length > 0 && (
+                <div style={{ marginBottom: '0.75rem' }}>
+                  <strong style={{ display: 'block', marginBottom: '0.4rem' }}>📦 Items</strong>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                    <thead>
+                      <tr style={{ background: 'var(--sapList_HeaderBackground)', color: 'var(--sapList_HeaderTextColor)' }}>
+                        <th style={{ padding: '0.3rem 0.5rem', textAlign: 'left', border: '1px solid var(--sapList_BorderColor)' }}>Material</th>
+                        <th style={{ padding: '0.3rem 0.5rem', textAlign: 'left', border: '1px solid var(--sapList_BorderColor)' }}>Description</th>
+                        <th style={{ padding: '0.3rem 0.5rem', textAlign: 'right', border: '1px solid var(--sapList_BorderColor)' }}>Ordered</th>
+                        <th style={{ padding: '0.3rem 0.5rem', textAlign: 'right', border: '1px solid var(--sapList_BorderColor)' }}>Shipped</th>
+                        <th style={{ padding: '0.3rem 0.5rem', textAlign: 'center', border: '1px solid var(--sapList_BorderColor)' }}>Unit</th>
+                        <th style={{ padding: '0.3rem 0.5rem', textAlign: 'right', border: '1px solid var(--sapList_BorderColor)' }}>Price</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selected.items.map((item, idx) => (
+                        <tr key={item.ID || idx} style={{ background: idx % 2 === 0 ? 'transparent' : 'var(--sapList_AlternatingBackground)' }}>
+                          <td style={{ padding: '0.3rem 0.5rem', border: '1px solid var(--sapList_BorderColor)' }}>{item.materialId || "—"}</td>
+                          <td style={{ padding: '0.3rem 0.5rem', border: '1px solid var(--sapList_BorderColor)' }}>{item.materialDesc || "—"}</td>
+                          <td style={{ padding: '0.3rem 0.5rem', textAlign: 'right', border: '1px solid var(--sapList_BorderColor)' }}>{item.orderedQuantity ?? "—"}</td>
+                          <td style={{ padding: '0.3rem 0.5rem', textAlign: 'right', border: '1px solid var(--sapList_BorderColor)' }}>{item.quantity ?? "—"}</td>
+                          <td style={{ padding: '0.3rem 0.5rem', textAlign: 'center', border: '1px solid var(--sapList_BorderColor)' }}>{item.unit || "—"}</td>
+                          <td style={{ padding: '0.3rem 0.5rem', textAlign: 'right', border: '1px solid var(--sapList_BorderColor)' }}>{item.negotiatedPrice != null ? Number(item.negotiatedPrice).toLocaleString() : "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
               {selected.status === "Exception" && isManager && (
                 <div style={{
                   marginTop: "1rem",
@@ -394,6 +587,117 @@ export default function ShipmentWorkspace() {
                       disabled={rejectMutation.isPending}
                     >
                       {rejectMutation.isPending ? "Rejecting…" : "Reject Exception"}
+                    </Button>
+                  </FlexBox>
+                </div>
+              )}
+
+              {isOverdue(selected) && (
+                <div style={{
+                  marginTop: "1rem",
+                  padding: "0.75rem 1rem",
+                  background: "#fbeaea",
+                  borderRadius: 8,
+                  border: "1px solid #f5c0c0",
+                  display: 'flex', alignItems: 'center', gap: '0.5rem',
+                }}>
+                  <span style={{ fontWeight: 700, color: '#aa0808' }}>OVERDUE</span>
+                  <span style={{ fontSize: '0.85rem', color: '#aa0808' }}>
+                    Expected delivery {new Date(selected.deliveryDate).toLocaleDateString()} has passed but goods not yet confirmed received.
+                  </span>
+                </div>
+              )}
+
+              {/* ── Mark as Shipped — Vendor only, when Pending ── */}
+              {selected.status === "Pending" && !isManager && (
+                <div style={{
+                  marginTop: "1rem",
+                  padding: "1rem",
+                  background: "var(--sapInformationBackground)",
+                  borderRadius: 8,
+                  border: "1px solid var(--sapInformationBorderColor)",
+                }}>
+                  <div style={{ fontWeight: 600, marginBottom: "0.5rem" }}>
+                    Ready to Ship?
+                  </div>
+                  <div style={{ fontSize: "0.85rem", color: "var(--sapContent_LabelColor)", marginBottom: "0.75rem" }}>
+                    Click below when goods have left your warehouse to notify the procurement team.
+                  </div>
+                  <Button
+                    design="Emphasized"
+                    icon="shipping-status"
+                    onClick={() => markShippedMutation.mutate(selected.ID)}
+                    disabled={markShippedMutation.isPending}
+                  >
+                    {markShippedMutation.isPending ? "Processing…" : "Mark as Shipped"}
+                  </Button>
+                </div>
+              )}
+
+              {/* ── Manager: Goods Receipt — Received / Not Received ── */}
+              {selected.status === "Shipped" && isManager && (
+                <div style={{
+                  marginTop: "1rem", padding: "1rem",
+                  background: "var(--sapSuccessBackground)",
+                  borderRadius: 8, border: "1px solid var(--sapSuccessBorderColor)",
+                }}>
+                  <div style={{ fontWeight: 600, marginBottom: "0.25rem" }}>Goods Receipt</div>
+                  <div style={{ fontSize: "0.85rem", color: "var(--sapContent_LabelColor)", marginBottom: "0.75rem" }}>
+                    Have the goods been physically received?
+                  </div>
+                  <FlexBox style={{ gap: "0.5rem" }}>
+                    <Button design="Positive" icon="complete"
+                      onClick={() => setConfirmDialogOpen(true)}
+                      disabled={confirmMutation.isPending}
+                    >
+                      Received
+                    </Button>
+                    <Button design="Negative" icon="decline"
+                      onClick={() => { notReceivedRef.current = {}; setNotReceivedDialogOpen(true); }}
+                      disabled={flagNotReceivedMutation.isPending}
+                    >
+                      Not Received
+                    </Button>
+                  </FlexBox>
+                </div>
+              )}
+
+              {/* ── Vendor: NOT_RECEIVED banner + Reconfirm / Flag Delay ── */}
+              {selected.status === "Exception" && selected.exceptionType === "NOT_RECEIVED" && !isManager && (
+                <div style={{
+                  marginTop: "1rem", padding: "1rem",
+                  background: "#fff8db", borderRadius: 8,
+                  border: "1px solid #f0c030",
+                }}>
+                  <div style={{ fontWeight: 600, marginBottom: "0.25rem", color: "#8b6f00" }}>
+                    ⚠️ Procurement team reports goods not yet received
+                  </div>
+                  {selected.delayReason && (
+                    <div style={{ fontSize: "0.85rem", color: "var(--sapContent_LabelColor)", marginBottom: "0.75rem" }}>
+                      Reason: {selected.delayReason}
+                    </div>
+                  )}
+                  <div style={{ fontSize: "0.85rem", marginBottom: "0.75rem" }}>
+                    Please reconfirm delivery or flag a delay with a new date.
+                  </div>
+                  <FlexBox style={{ gap: "0.5rem" }}>
+                    <Button design="Emphasized" icon="shipping-status"
+                      onClick={() => reconfirmMutation.mutate(selected.ID)}
+                      disabled={reconfirmMutation.isPending}
+                    >
+                      {reconfirmMutation.isPending ? "Processing…" : "Reconfirm Delivered"}
+                    </Button>
+                    <Button design="Attention"
+                      onClick={() => {
+                        setExceptionShipment(selected);
+                        const existingDate = selected.deliveryDate ? new Date(selected.deliveryDate) : new Date();
+                        exceptionRef.current = {
+                          proposedDeliveryDate: existingDate.toISOString().split('T')[0] + 'T00:00:00Z',
+                        };
+                        setExceptionDialogOpen(true);
+                      }}
+                    >
+                      Flag Delay
                     </Button>
                   </FlexBox>
                 </div>
@@ -514,87 +818,225 @@ export default function ShipmentWorkspace() {
       <Dialog
         open={dialogOpen}
         headerText="Create New Shipment"
+        style={{ '--_ui5-dialog-max-height': '90vh' }}
         footer={
-          <Bar
-            endContent={
-              <FlexBox style={{ gap: "0.5rem" }}>
-                <Button onClick={() => setDialogOpen(false)}>Cancel</Button>
-                <Button
-                  design="Emphasized"
-                  onClick={() => {
-                    // Fallback: đọc trực tiếp từ DOM nếu onChange chưa fire
-                    if (!formRef.current.deliveryDate) {
-                      const raw = deliveryDatePickerRef.current?.value;
-                      if (raw) {
-                        const parsed = new Date(raw);
-                        if (!isNaN(parsed)) {
-                          formRef.current.deliveryDate = parsed.toISOString().split('T')[0] + 'T00:00:00Z';
-                        }
-                      }
-                    }
-                    if (!formRef.current.deliveryDate) {
-                      alert("Please select a delivery date.");
-                      return;
-                    }
-                    createMutation.mutate({
-                      deliveryDate: formRef.current.deliveryDate,
-                      totalWeight: parseFloat(formRef.current.totalWeight) || 0,
-                      vendor_ID: formRef.current.vendor_ID || null,
-                      purchaseOrderId: formRef.current.purchaseOrderId || null,
-                      status: "Draft",
-                    })
-                  }}
-                  disabled={createMutation.isPending}
-                >
-                  {createMutation.isPending
-                    ? "Saving..."
-                    : "Save Draft"}
-                </Button>
-              </FlexBox>
-            }
-          />
+          <Bar endContent={
+            <FlexBox style={{ gap: "0.5rem" }}>
+              <Button onClick={() => { setDialogOpen(false); setPoItems([]); setShipQtys({}); }}>Cancel</Button>
+              <Button
+                design="Emphasized"
+                disabled={createMutation.isPending}
+                onClick={handleCreateShipment}
+              >
+                {createMutation.isPending ? "Saving..." : "Save as Draft"}
+              </Button>
+            </FlexBox>
+          } />
         }
-        onClose={() => { setDialogOpen(false); formRef.current = {}; }}
+        onClose={() => { setDialogOpen(false); setPoItems([]); setShipQtys({}); }}
       >
-        <Form style={{ padding: "1rem", minWidth: 400 }}>
-          <FormItem label={<Label>Purchase Order</Label>}>
+        <div style={{ padding: "1rem", minWidth: 560, maxWidth: 680, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+
+          {/* ── Step 1: Select PO ── */}
+          <div>
+            <Label style={{ fontWeight: 600, marginBottom: '0.4rem', display: 'block' }}>
+              Purchase Order <span style={{ color: 'var(--sapErrorColor)' }}>*</span>
+            </Label>
             <Select
-              onChange={(e) => {
-                const val = e.detail.selectedOption.value;
-                const po = purchaseOrders.find(p => p.PurchaseOrder === val);
-                formRef.current.purchaseOrderId = val;
-                // Auto-fill vendor from PO's Supplier field
-                if (po?.Supplier) formRef.current.vendor_ID = po.Supplier;
-              }}
+              style={{ width: '100%' }}
+              onChange={(e) => handlePOSelect(e.detail.selectedOption.value)}
             >
               <Option value="">— Select Purchase Order —</Option>
               {purchaseOrders.map((po) => (
                 <Option key={po.PurchaseOrder} value={po.PurchaseOrder}>
-                  {po.PurchaseOrder} — {po.Supplier} ({po.DocumentCurrency})
+                  {po.PurchaseOrder} · Supplier: {po.Supplier} · {po.DocumentCurrency}
                 </Option>
               ))}
             </Select>
+          </div>
+
+          {/* ── PO Items panel ── */}
+          {newForm.purchaseOrderId && (
+            <div style={{
+              border: '1px solid var(--sapList_BorderColor)',
+              borderRadius: 8,
+              overflow: 'hidden',
+            }}>
+              <div style={{
+                padding: '0.6rem 1rem',
+                background: 'var(--sapList_HeaderBackground)',
+                fontWeight: 600,
+                fontSize: '0.85rem',
+                borderBottom: '1px solid var(--sapList_BorderColor)',
+              }}>
+                PO Items — specify qty to ship in this shipment
+              </div>
+              {poItemsLoading ? (
+                <div style={{ padding: '1rem', textAlign: 'center' }}>
+                  <BusyIndicator active size="Small" />
+                </div>
+              ) : poItems.length === 0 ? (
+                <div style={{ padding: '1rem', color: 'var(--sapContent_LabelColor)', fontSize: '0.85rem' }}>
+                  No items found for this PO.
+                </div>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                  <thead>
+                    <tr style={{ background: 'var(--sapList_HeaderBackground)' }}>
+                      {['Material', 'Description', 'Ordered', 'Unit', 'Price', 'Qty to Ship'].map(h => (
+                        <th key={h} style={{ padding: '0.4rem 0.6rem', textAlign: 'left', fontWeight: 600, color: 'var(--sapContent_LabelColor)', borderBottom: '1px solid var(--sapList_BorderColor)' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {poItems.map((item, idx) => (
+                      <tr key={item.purchaseOrderItem} style={{ background: idx % 2 === 0 ? 'transparent' : 'var(--sapList_AlternatingRowBackground)' }}>
+                        <td style={{ padding: '0.4rem 0.6rem', fontWeight: 600 }}>{item.material || '—'}</td>
+                        <td style={{ padding: '0.4rem 0.6rem', color: 'var(--sapContent_LabelColor)' }}>{item.materialDesc || '—'}</td>
+                        <td style={{ padding: '0.4rem 0.6rem' }}>{item.orderQuantity}</td>
+                        <td style={{ padding: '0.4rem 0.6rem' }}>{item.unit}</td>
+                        <td style={{ padding: '0.4rem 0.6rem' }}>
+                          {item.netPriceAmount != null
+                            ? `${item.currency} ${Number(item.netPriceAmount).toLocaleString(undefined, { minimumFractionDigits: 2 })}`
+                            : '—'}
+                        </td>
+                        <td style={{ padding: '0.4rem 0.6rem' }}>
+                          <input
+                            type="number"
+                            min="0"
+                            max={item.orderQuantity}
+                            step="0.001"
+                            value={shipQtys[item.purchaseOrderItem] ?? item.orderQuantity}
+                            onChange={(e) => setShipQtys(prev => ({ ...prev, [item.purchaseOrderItem]: e.target.value }))}
+                            style={{
+                              width: 80, padding: '0.25rem 0.4rem',
+                              border: '1px solid var(--sapField_BorderColor)',
+                              borderRadius: 4, fontSize: '0.82rem',
+                            }}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+
+          {/* ── Delivery details ── */}
+          <FlexBox style={{ gap: '1rem' }}>
+            <div style={{ flex: 1 }}>
+              <Label style={{ fontWeight: 600, marginBottom: '0.4rem', display: 'block' }}>
+                Delivery Date <span style={{ color: 'var(--sapErrorColor)' }}>*</span>
+              </Label>
+              <DatePicker
+                ref={deliveryDatePickerRef}
+                style={{ width: '100%' }}
+                value={new Date().toLocaleDateString('en-US')}
+                minDate={new Date().toLocaleDateString('en-US')}
+                onChange={(e) => {
+                  const val = e.detail?.value || e.target?.value;
+                  if (val) {
+                    const parsed = new Date(val);
+                    if (!isNaN(parsed.getTime())) {
+                      setNewForm(f => ({ ...f, deliveryDate: parsed.toISOString().split('T')[0] + 'T00:00:00Z' }));
+                    }
+                  }
+                }}
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <Label style={{ fontWeight: 600, marginBottom: '0.4rem', display: 'block' }}>Total Weight (kg)</Label>
+              <Input
+                type="Number"
+                placeholder="0.000"
+                style={{ width: '100%' }}
+                onInput={(e) => setNewForm(f => ({ ...f, totalWeight: e.target.value }))}
+              />
+            </div>
+          </FlexBox>
+
+          <div>
+            <Label style={{ fontWeight: 600, marginBottom: '0.4rem', display: 'block' }}>Delivery Address</Label>
+            <Input
+              placeholder="Street, City, Country"
+              style={{ width: '100%' }}
+              onInput={(e) => setNewForm(f => ({ ...f, deliveryAddress: e.target.value }))}
+            />
+          </div>
+
+          <div>
+            <Label style={{ fontWeight: 600, marginBottom: '0.4rem', display: 'block' }}>Notes</Label>
+            <Input
+              placeholder="Carrier info, special instructions..."
+              style={{ width: '100%' }}
+              onInput={(e) => setNewForm(f => ({ ...f, notes: e.target.value }))}
+            />
+          </div>
+        </div>
+      </Dialog>
+
+      {/* Confirm Delivery Dialog — Manager */}
+      <Dialog
+        open={confirmDialogOpen}
+        headerText="Confirm Delivery — Goods Receipt"
+        footer={
+          <Bar endContent={
+            <FlexBox style={{ gap: "0.5rem" }}>
+              <Button onClick={() => setConfirmDialogOpen(false)}>Cancel</Button>
+              <Button
+                design="Positive"
+                disabled={confirmMutation.isPending}
+                onClick={() => {
+                  if (!confirmRef.current.receivedDate) {
+                    const raw = confirmDatePickerRef.current?.value;
+                    if (raw) {
+                      const parsed = new Date(raw);
+                      if (!isNaN(parsed)) {
+                        confirmRef.current.receivedDate = parsed.toISOString().split('T')[0] + 'T00:00:00Z';
+                      }
+                    }
+                  }
+                  confirmMutation.mutate({
+                    shipmentId:   selected?.ID,
+                    receivedDate: confirmRef.current.receivedDate || new Date().toISOString(),
+                    receivedNote: confirmRef.current.receivedNote || '',
+                  });
+                }}
+              >
+                {confirmMutation.isPending ? "Confirming…" : "Confirm Receipt"}
+              </Button>
+            </FlexBox>
+          } />
+        }
+        onClose={() => setConfirmDialogOpen(false)}
+      >
+        <Form style={{ padding: "1rem", minWidth: 380 }}>
+          <FormItem label={<Label>Shipment</Label>}>
+            <Input value={selected?.shipmentNumber || selected?.ID?.substring(0, 8) + "…"} readonly />
           </FormItem>
-          <FormItem label={<Label>Delivery Date</Label>}>
+          <FormItem label={<Label>Vendor</Label>}>
+            <Input value={selected?.vendorCode || "—"} readonly />
+          </FormItem>
+          <FormItem label={<Label>Date Received</Label>}>
             <DatePicker
-              ref={deliveryDatePickerRef}
-              minDate={new Date().toLocaleDateString('en-US')}
+              ref={confirmDatePickerRef}
+              value={new Date().toLocaleDateString('en-US')}
               onChange={(e) => {
                 const val = e.detail?.value || e.target?.value;
                 if (val) {
-                  const [m, d, y] = val.split('/');
-                  if (y && m && d) {
-                    formRef.current.deliveryDate = `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}T00:00:00Z`;
+                  const parsed = new Date(val);
+                  if (!isNaN(parsed)) {
+                    confirmRef.current.receivedDate = parsed.toISOString().split('T')[0] + 'T00:00:00Z';
                   }
                 }
               }}
             />
           </FormItem>
-          <FormItem label={<Label>Weight (kg)</Label>}>
+          <FormItem label={<Label>Receipt Note (optional)</Label>}>
             <Input
-              type="Number"
-              placeholder="0"
-              onInput={(e) => (formRef.current.totalWeight = e.target.value)}
+              placeholder="e.g. Goods received in good condition"
+              onInput={(e) => (confirmRef.current.receivedNote = e.target.value)}
             />
           </FormItem>
         </Form>
@@ -637,7 +1079,18 @@ export default function ShipmentWorkspace() {
       >
         <Form style={{ padding: "1rem", minWidth: 400 }}>
           <FormItem label={<Label>Shipment</Label>}>
-            <Input value={exceptionShipment?.ID?.substring(0, 8) + "…"} readonly />
+            <Input
+              value={exceptionShipment?.shipmentNumber || (exceptionShipment?.ID?.substring(0, 8) + "…")}
+              readonly
+            />
+          </FormItem>
+          <FormItem label={<Label>Current Delivery Date</Label>}>
+            <Input
+              value={exceptionShipment?.deliveryDate
+                ? new Date(exceptionShipment.deliveryDate).toLocaleDateString()
+                : "—"}
+              readonly
+            />
           </FormItem>
           <FormItem label={<Label>Reason for Delay</Label>}>
             <Input
@@ -649,6 +1102,9 @@ export default function ShipmentWorkspace() {
             <DatePicker
               ref={exceptionDatePickerRef}
               minDate={new Date().toLocaleDateString('en-US')}
+              value={exceptionShipment?.deliveryDate
+                ? new Date(exceptionShipment.deliveryDate).toLocaleDateString('en-US')
+                : new Date().toLocaleDateString('en-US')}
               onChange={(e) => {
                 const val = e.detail?.value || e.target?.value;
                 if (val) {
@@ -662,6 +1118,11 @@ export default function ShipmentWorkspace() {
           </FormItem>
         </Form>
       </Dialog>
+
+      {/* Toast notification — Mark as Shipped */}
+      <Toast ref={toastRef} duration={4000} placement="BottomCenter">
+        {toastMsg}
+      </Toast>
 
       {/* Approve Exception Dialog — Manager */}
       <Dialog
@@ -703,7 +1164,7 @@ export default function ShipmentWorkspace() {
       >
         <Form style={{ padding: "1rem", minWidth: 380 }}>
           <FormItem label={<Label>Shipment</Label>}>
-            <Input value={selected?.ID?.substring(0, 8) + "…"} readonly />
+            <Input value={selected?.shipmentNumber || selected?.ID?.substring(0, 8) + "…"} readonly />
           </FormItem>
           <FormItem label={<Label>Vendor's Reason</Label>}>
             <Input value={selected?.delayReason || "—"} readonly />
@@ -732,6 +1193,59 @@ export default function ShipmentWorkspace() {
                   }
                 }
               }}
+            />
+          </FormItem>
+        </Form>
+      </Dialog>
+
+      {/* Not Received Dialog — Manager */}
+      <Dialog
+        open={notReceivedDialogOpen}
+        headerText="Flag — Goods Not Received"
+        footer={
+          <Bar endContent={
+            <FlexBox style={{ gap: "0.5rem" }}>
+              <Button onClick={() => setNotReceivedDialogOpen(false)}>Cancel</Button>
+              <Button
+                design="Negative"
+                disabled={flagNotReceivedMutation.isPending}
+                onClick={() => {
+                  flagNotReceivedMutation.mutate({
+                    shipmentId: selected?.ID,
+                    reason: notReceivedRef.current.reason || '',
+                  });
+                }}
+              >
+                {flagNotReceivedMutation.isPending ? "Flagging…" : "Confirm Not Received"}
+              </Button>
+            </FlexBox>
+          } />
+        }
+        onClose={() => setNotReceivedDialogOpen(false)}
+      >
+        <Form style={{ padding: "1rem", minWidth: 380 }}>
+          <FormItem label={<Label>Shipment</Label>}>
+            <Input value={selected?.shipmentNumber || selected?.ID?.substring(0, 8) + "…"} readonly />
+          </FormItem>
+          <FormItem label={<Label>Reason</Label>}>
+            <Select
+              style={{ width: "100%" }}
+              onChange={(e) => { notReceivedRef.current.reason = e.detail.selectedOption.value; }}
+            >
+              <Option value="Goods not arrived">Goods not arrived</Option>
+              <Option value="Wrong items delivered">Wrong items delivered</Option>
+              <Option value="Damaged goods">Damaged goods</Option>
+              <Option value="Incomplete shipment">Incomplete shipment</Option>
+              <Option value="Other">Other</Option>
+            </Select>
+          </FormItem>
+          <FormItem label={<Label>Note (optional)</Label>}>
+            <Input
+              placeholder="Additional details..."
+              onInput={(e) => {
+                notReceivedRef.current.reason = (notReceivedRef.current.reason || '') + (e.target.value ? ` — ${e.target.value}` : '');
+              }}
+              style={{ width: "100%" }}
             />
           </FormItem>
         </Form>

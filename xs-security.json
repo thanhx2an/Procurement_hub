@@ -1,5 +1,5 @@
 {
-  "xsappname": "poc2-procurement-hub",
+  "xsappname": "baongoc-procurement-hub",
   "tenant-mode": "dedicated",
   "oauth2-configuration": {
     "token-validity": 43200,

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import {
   Button,
   ShellBar,
@@ -7,11 +8,17 @@ import {
   SideNavigation,
   SideNavigationItem,
 } from "@ui5/webcomponents-react";
+import { fetchMe } from "../api/client";
 
 export default function AppShell({ children }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarVisible, setSidebarVisible] = useState(true);
+  const { data: me } = useQuery({ queryKey: ['me'], queryFn: fetchMe });
+
+  const isVendorAdmin = me?.roles?.includes('VendorAdmin');
+  const isManager     = me?.roles?.includes('ProcurementManager');
+  const showContacts  = isVendorAdmin || isManager;
 
   return (
     <div
@@ -26,8 +33,11 @@ export default function AppShell({ children }) {
         primaryTitle="Procurement Hub"
         secondaryTitle="POC 2 – Multi-Vendor"
       >
-        <ShellBarItem icon="bell" text="Notifications" />
-        <ShellBarItem icon="settings" text="Settings" />
+        <ShellBarItem
+          icon="log"
+          text="Sign Out"
+          onClick={() => { window.location.href = '/logout'; }}
+        />
       </ShellBar>
 
       <div
@@ -103,6 +113,13 @@ export default function AppShell({ children }) {
                 icon="document-text"
                 data-path="/audit-logs"
                 selected={location.pathname === "/audit-logs"}
+              />
+              <SideNavigationItem
+                text="Vendor Contacts"
+                icon="employee"
+                data-path="/contacts"
+                selected={location.pathname === "/contacts"}
+                style={{ display: showContacts ? undefined : 'none' }}
               />
             </SideNavigation>
           )}

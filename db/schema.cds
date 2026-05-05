@@ -16,6 +16,7 @@ entity Products : cuid, managed {
 }
 
 entity Shipments : cuid, managed {
+    shipmentNumber   : String(20);  // e.g. SHP-2026-00001, auto-generated on activation
     vendor           : Association to Vendors;
     vendorCode       : String(10);
     status           : String enum {
@@ -24,8 +25,11 @@ entity Shipments : cuid, managed {
     deliveryDate     : DateTime;
     totalWeight      : Decimal(13,3);
     purchaseOrderId       : String(10);
+    deliveryAddress       : String(500);
+    notes                 : String(1000);
     delayReason           : String(500);
     proposedDeliveryDate  : DateTime;
+    exceptionType         : String(20);  // 'VENDOR_DELAY' | 'NOT_RECEIVED'
     items            : Composition of many ShipmentItems on items.parent = $self;
     attachments      : Composition of many AssetAttachments on attachments.shipment = $self;
 
@@ -50,19 +54,41 @@ entity AssetAttachments : cuid {
 entity ShipmentItems : cuid {
     parent          : Association to Shipments;
     product         : Association to Products;
+    // Direct S/4HANA material reference (no dependency on CAP Products entity)
+    materialId      : String(18);
+    materialDesc    : String(40);
     quantity        : Decimal(13,3);
+    orderedQuantity : Decimal(13,3);
     unit            : String(10);
     negotiatedPrice : Decimal(15,2);
+    poItem          : String(5);
 }
 
 entity PriceLedger : cuid, temporal {
     product         : Association to Products;
     vendor          : Association to Vendors;
     vendorCode      : String(10);
+    // S/4HANA material reference (auto-populated from ShipmentItems)
+    materialId      : String(18);
+    materialDesc    : String(40);
+    sourceShipment  : Association to Shipments;
     validFrom       : DateTime;
     validTo         : DateTime;
     negotiatedPrice : Decimal(15,2);
     basePrice       : Decimal(15,2);
+}
+
+entity Contacts : cuid, managed {
+    vendor      : Association to Vendors;
+    vendorCode  : String(10);
+    firstName   : String(40);
+    lastName    : String(40);
+    email       : String(241);
+    phone       : String(30);
+    mobile      : String(30);
+    department  : String(40);
+    jobFunction : String(40);
+    isPrimary   : Boolean default false;
 }
 
 entity AuditLogs : cuid {
