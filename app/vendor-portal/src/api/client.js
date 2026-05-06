@@ -76,6 +76,29 @@ export const triggerCriticalDelay = async ({ shipmentId, reason, proposedDeliver
 export const deleteDraft = async (id) => {
   await api.delete(`/Shipments(ID=${id},IsActiveEntity=false)`);
 };
+export const createEmptyDraft = async () => {
+  const { data } = await api.post("/Shipments", {});
+  return data;
+};
+export const updateDraft = async ({ id, payload }) => {
+  const { data } = await api.patch(`/Shipments(ID=${id},IsActiveEntity=false)`, payload);
+  return data;
+};
+export const addDraftItem = async ({ shipmentId, item }) => {
+  const { data } = await api.post(`/Shipments(ID=${shipmentId},IsActiveEntity=false)/items`, item);
+  return data;
+};
+export const updateDraftItem = async ({ shipmentId, itemId, qty }) => {
+  await api.patch(
+    `/Shipments(ID=${shipmentId},IsActiveEntity=false)/items(ID=${itemId},IsActiveEntity=false)`,
+    { quantity: qty }
+  );
+};
+export const deleteDraftItem = async ({ shipmentId, itemId }) => {
+  await api.delete(
+    `/Shipments(ID=${shipmentId},IsActiveEntity=false)/items(ID=${itemId},IsActiveEntity=false)`
+  );
+};
 export const fetchAttachments = async (shipmentId) => {
   const { data } = await api.get(
     `/AssetAttachments?$filter=shipment_ID eq ${shipmentId}&$orderby=uploadedAt desc`
@@ -83,7 +106,7 @@ export const fetchAttachments = async (shipmentId) => {
   return data.value;
 };
 export const deleteAttachment = async (id) => {
-  await api.delete(`/AssetAttachments(${id})`);
+  await api.delete(`/AssetAttachments(ID='${id}',IsActiveEntity=true)`);
 };
 export const fetchPriceLedger = async () => {
   const { data } = await api.get("/PriceLedger?$orderby=validFrom desc");

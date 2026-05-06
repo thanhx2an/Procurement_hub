@@ -45,26 +45,26 @@ function PriceTimeline({ entries }) {
             <div style={{
               flex: 1, marginBottom: '1rem',
               padding: '0.75rem 1rem',
-              border: '1px solid var(--sapList_BorderColor)',
+              border: i === 0 ? 'none' : '1px solid var(--sapList_BorderColor)',
               borderRadius: 8,
-              background: i === 0 ? 'var(--sapHighlightColor, #e6f2ff)' : 'var(--sapBaseColor)',
-              borderLeft: `3px solid ${dotColor}`,
+              background: i === 0 ? '#0a6ed1' : 'var(--sapBaseColor)',
+              borderLeft: i === 0 ? 'none' : `3px solid ${dotColor}`,
             }}>
               {/* Date + vendor row */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
-                <span style={{ fontSize: '0.75rem', color: 'var(--sapContent_LabelColor)', fontWeight: 600 }}>
+                <span style={{ fontSize: '0.75rem', color: i === 0 ? 'rgba(255,255,255,0.8)' : 'var(--sapContent_LabelColor)', fontWeight: 600 }}>
                   {e.validFrom
                     ? new Date(e.validFrom).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
                     : '—'}
                   {i === 0 && (
                     <span style={{
                       marginLeft: 8, padding: '0.05rem 0.4rem', borderRadius: 999,
-                      background: '#0a6ed1', color: '#fff', fontSize: '0.65rem',
+                      background: 'rgba(255,255,255,0.25)', color: '#fff', fontSize: '0.65rem',
                     }}>CURRENT</span>
                   )}
                 </span>
                 {e.vendorCode && (
-                  <span style={{ fontSize: '0.75rem', color: 'var(--sapContent_LabelColor)' }}>
+                  <span style={{ fontSize: '0.75rem', color: i === 0 ? 'rgba(255,255,255,0.8)' : 'var(--sapContent_LabelColor)' }}>
                     Vendor {e.vendorCode}
                   </span>
                 )}
@@ -72,11 +72,11 @@ function PriceTimeline({ entries }) {
 
               {/* Price row */}
               <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--sapTextColor)' }}>
+                <span style={{ fontSize: '1.2rem', fontWeight: 700, color: i === 0 ? '#fff' : 'var(--sapTextColor)' }}>
                   ${Number(e.negotiatedPrice).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                 </span>
                 {e.basePrice > 0 && (
-                  <span style={{ fontSize: '0.8rem', color: 'var(--sapContent_LabelColor)', textDecoration: 'line-through' }}>
+                  <span style={{ fontSize: '0.8rem', color: i === 0 ? 'rgba(255,255,255,0.6)' : 'var(--sapContent_LabelColor)', textDecoration: 'line-through' }}>
                     ${Number(e.basePrice).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </span>
                 )}
@@ -84,15 +84,16 @@ function PriceTimeline({ entries }) {
                   <span style={{
                     padding: '0.1rem 0.45rem', borderRadius: 999,
                     fontSize: '0.72rem', fontWeight: 700,
-                    background: isSaving ? '#edf8e9' : '#fbeaea',
-                    color: isSaving ? '#256f3a' : '#aa0808',
+                    background: i === 0 ? 'rgba(255,255,255,0.2)' : (isSaving ? '#edf8e9' : '#fbeaea'),
+                    color: i === 0 ? '#fff' : (isSaving ? '#256f3a' : '#aa0808'),
                   }}>
                     {isSaving ? '▼' : '▲'} {Math.abs(savings)}% vs baseline
                   </span>
                 )}
                 {priceChange !== null && (
                   <span style={{
-                    fontSize: '0.72rem', color: priceChange < 0 ? '#256f3a' : priceChange > 0 ? '#aa0808' : '#6e6e6e',
+                    fontSize: '0.72rem',
+                    color: i === 0 ? 'rgba(255,255,255,0.8)' : (priceChange < 0 ? '#256f3a' : priceChange > 0 ? '#aa0808' : '#6e6e6e'),
                   }}>
                     {priceChange < 0 ? '↓' : priceChange > 0 ? '↑' : '='} {Math.abs(priceChange).toFixed(2)} vs prev
                   </span>
@@ -115,8 +116,8 @@ function PriceTimeline({ entries }) {
 
 // ── Savings badge ──────────────────────────────────────────────────────────
 function SavingsBadge({ negotiated, base }) {
-  if (!base || base === 0) return <span style={{ color: 'var(--sapContent_LabelColor)' }}>—</span>;
-  const pct = ((1 - negotiated / base) * 100).toFixed(1);
+  if (!(Number(base) > 0)) return <span style={{ color: 'var(--sapContent_LabelColor)' }}>—</span>;
+  const pct = ((1 - Number(negotiated) / Number(base)) * 100).toFixed(1);
   const savings = pct > 0;
   return (
     <span style={{
@@ -175,6 +176,11 @@ export default function PriceLedger() {
 
   // ── SKU list for filter ──────────────────────────────────────────────────
   const skuList = [...new Set(ledger.map(e => e.materialId || e.product_ID).filter(Boolean))];
+  const skuDescMap = {};
+  ledger.forEach(e => {
+    const key = e.materialId || e.product_ID;
+    if (key && e.materialDesc) skuDescMap[key] = e.materialDesc;
+  });
   const timelineEntries = selectedSku
     ? ledger.filter(e => (e.materialId || e.product_ID) === selectedSku)
     : ledger;
@@ -353,7 +359,7 @@ export default function PriceLedger() {
                   <Option value="">All SKUs ({ledger.length} entries)</Option>
                   {skuList.map(sku => (
                     <Option key={sku} value={sku}>
-                      {sku} ({ledger.filter(e => (e.materialId || e.product_ID) === sku).length} entries)
+                      {skuDescMap[sku] || sku} ({ledger.filter(e => (e.materialId || e.product_ID) === sku).length} entries)
                     </Option>
                   ))}
                 </Select>
@@ -400,24 +406,45 @@ export default function PriceLedger() {
             subtitleText="Live reference — click to pre-fill when recording a negotiation"
           />
         }>
-          <div style={{ padding: '1rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-            {products.length === 0
-              ? <span style={{ color: 'var(--sapContent_LabelColor)' }}>No products loaded.</span>
-              : products.slice(0, 12).map(p => (
-                  <div key={p.Product} style={{
-                    padding: '0.45rem 0.85rem',
-                    border: '1px solid var(--sapList_BorderColor)',
-                    borderRadius: 8, fontSize: '0.8rem', cursor: 'pointer',
-                  }}
-                    onClick={() => { formRef.current.productId = p.Product; if (!dialogOpen) setDialogOpen(true); }}
-                    title="Click to pre-fill in new entry"
-                  >
-                    <strong>{p.Product}</strong>
-                    <span style={{ color: 'var(--sapContent_LabelColor)', marginLeft: 6 }}>
-                      {p.ProductType} · {p.BaseUnit}
-                    </span>
-                  </div>
-                ))
+          <div style={{ padding: '1rem', display: 'flex', flexWrap: 'wrap', gap: '0.6rem' }}>
+            {products.filter(p => p.ProductType !== 'SERV').length === 0
+              ? <span style={{ color: 'var(--sapContent_LabelColor)' }}>No materials loaded.</span>
+              : products.filter(p => p.ProductType !== 'SERV').map(p => {
+                  const recent = [...ledger]
+                    .filter(l => l.materialId === p.Product || l.product_ID === p.Product)
+                    .sort((a, b) => new Date(b.validFrom) - new Date(a.validFrom))[0];
+                  const baseline = recent && Number(recent.basePrice) > 0
+                    ? `$${Number(recent.basePrice).toFixed(2)} baseline`
+                    : 'No baseline yet';
+                  return (
+                    <div key={p.Product} style={{
+                      padding: '0.55rem 1rem',
+                      border: '1px solid var(--sapList_BorderColor)',
+                      borderRadius: 10,
+                      fontSize: '0.82rem',
+                      cursor: 'pointer',
+                      minWidth: 160,
+                      background: 'var(--sapBaseColor)',
+                    }}
+                      onClick={() => {
+                        const productId = p.Product;
+                        const vendorId = isVendor ? (me?.id || '') : '';
+                        const bp = recent && Number(recent.basePrice) > 0 ? String(recent.basePrice) : '';
+                        formRef.current = { productId, vendorId, basePrice: bp };
+                        setFormState(f => ({ ...f, productId, vendorId, basePrice: bp }));
+                        if (!dialogOpen) setDialogOpen(true);
+                      }}
+                      title="Click to pre-fill in new entry"
+                    >
+                      <div style={{ fontWeight: 600, marginBottom: 2 }}>
+                        {p.ProductDescription || p.Product}
+                      </div>
+                      <div style={{ color: 'var(--sapContent_LabelColor)', fontSize: '0.75rem' }}>
+                        {p.Product} · {p.BaseUnit} · {baseline}
+                      </div>
+                    </div>
+                  );
+                })
             }
           </div>
         </Card>
@@ -468,10 +495,10 @@ export default function PriceLedger() {
                 }
               }}
             >
-              <Option value="">— Select Product —</Option>
-              {products.map(p => (
-                <Option key={p.Product} value={p.Product}>
-                  {p.ProductDescription || p.Product} {p.Product !== (p.ProductDescription || p.Product) ? `(${p.Product})` : ''}
+              <Option value="" selected={!formState.productId}>— Select Product —</Option>
+              {skuList.map(sku => (
+                <Option key={sku} value={sku} selected={formState.productId === sku}>
+                  {skuDescMap[sku] ? `${skuDescMap[sku]} (${sku})` : sku}
                 </Option>
               ))}
             </Select>

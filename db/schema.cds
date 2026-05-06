@@ -30,6 +30,7 @@ entity Shipments : cuid, managed {
     delayReason           : String(500);
     proposedDeliveryDate  : DateTime;
     exceptionType         : String(20);  // 'VENDOR_DELAY' | 'NOT_RECEIVED'
+    trackingNumber        : String(100); // Carrier tracking number (from AI/OCR on delivery note)
     items            : Composition of many ShipmentItems on items.parent = $self;
     attachments      : Composition of many AssetAttachments on attachments.shipment = $self;
 
@@ -49,6 +50,11 @@ entity AssetAttachments : cuid {
     fileSize    : Integer;
     uploadedAt  : DateTime;
     uploadedBy  : String(100);
+    // AI/OCR extracted fields (from delivery note scan)
+    batchId     : String(100);
+    vendorName  : String(200);
+    totalAmount : Decimal(15,2);
+    aiConfidence: Decimal(3,2);
 }
 
 entity ShipmentItems : cuid {

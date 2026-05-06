@@ -25,6 +25,11 @@ import {
   fetchShipments,
   createShipment,
   activateDraft,
+  createEmptyDraft,
+  updateDraft,
+  addDraftItem,
+  updateDraftItem,
+  deleteDraftItem,
   uploadInvoice,
   triggerCriticalDelay,
   fetchVendors,
@@ -100,6 +105,10 @@ export default function ShipmentWorkspace() {
   const todayISO = () => new Date().toISOString().split('T')[0] + 'T00:00:00Z';
   const [newForm, setNewForm] = useState({ purchaseOrderId: '', deliveryDate: todayISO(), deliveryAddress: '', notes: '', totalWeight: '' });
   const formRef = useRef({});
+  // Draft auto-save state
+  const [activeDraftId, setActiveDraftId] = useState(null);  // UUID of draft being edited
+  const [draftItems, setDraftItems] = useState([]);           // items already saved to DB
+  const patchDebounceRef = useRef(null);
   const approveRef = useRef({});
   const exceptionRef = useRef({});
   const deliveryDatePickerRef = useRef(null);
@@ -146,7 +155,15 @@ export default function ShipmentWorkspace() {
 
   const submitDraftMutation = useMutation({
     mutationFn: activateDraft,
-    onSuccess: () => queryClient.invalidateQueries(["shipments"]),
+    onSuccess: () => {
+      queryClient.invalidateQueries(["shipments"]);
+      setDialogOpen(false);
+      setActiveDraftId(null);
+      setDraftItems([]);
+      setPoItems([]);
+      setShipQtys({});
+      setNewForm({ purchaseOrderId: '', deliveryDate: todayISO(), deliveryAddress: '', notes: '', totalWeight: '' });
+    },
     onError: (err) => {
       const msg = err?.response?.data?.error?.message || err.message || 'Unknown error';
       setActionMsg({ type: 'Negative', text: `❌ Activate failed: ${msg}` });
@@ -275,17 +292,50 @@ export default function ShipmentWorkspace() {
 
   const handlePOSelect = async (poId) => {
     setNewForm(f => ({ ...f, purchaseOrderId: poId }));
+    patchDraftField({ purchaseOrderId: poId });
     setPoItems([]);
     setShipQtys({});
     if (!poId) return;
     setPoItemsLoading(true);
     try {
+      // Delete existing draft items first (allow re-selecting PO)
+      if (activeDraftId && draftItems.length > 0) {
+        for (const di of draftItems) {
+          await deleteDraftItem({ shipmentId: activeDraftId, itemId: di.ID }).catch(() => {});
+        }
+        setDraftItems([]);
+      }
+
       const items = await fetchPOItems(poId);
       setPoItems(items);
-      // Default: ship 100% of each item
       const qtys = {};
       items.forEach(i => { qtys[i.purchaseOrderItem] = i.orderQuantity; });
       setShipQtys(qtys);
+
+      // Auto-save items into the draft immediately
+      if (activeDraftId) {
+        const added = [];
+        for (const item of items) {
+          try {
+            const res = await addDraftItem({
+              shipmentId: activeDraftId,
+              item: {
+                materialId:      item.material,
+                materialDesc:    item.materialDesc,
+                quantity:        parseFloat(item.orderQuantity) || 0,
+                orderedQuantity: parseFloat(item.orderQuantity) || 0,
+                unit:            item.unit,
+                negotiatedPrice: item.netPriceAmount || 0,
+                poItem:          item.purchaseOrderItem,
+              },
+            });
+            added.push({ ...res, poItem: item.purchaseOrderItem });
+          } catch (e) {
+            console.warn('[draft] Failed to add item:', e.message);
+          }
+        }
+        setDraftItems(added);
+      }
     } catch (e) {
       setActionMsg({ type: 'Negative', text: `Failed to load PO items: ${e.message}` });
     } finally {
@@ -307,14 +357,67 @@ export default function ShipmentWorkspace() {
     createMutation.mutate({
       deliveryDate:     newForm.deliveryDate,
       totalWeight:      parseFloat(newForm.totalWeight) || 0,
-      // vendor_ID và vendorCode được backend auto-set từ JWT (VendorID attribute)
-      // Không gửi me?.id vì đó là BTP login name, không phải Vendor UUID
       purchaseOrderId:  newForm.purchaseOrderId || null,
       deliveryAddress:  newForm.deliveryAddress || null,
       notes:            newForm.notes || null,
       status:           'Draft',
       items,
     });
+  };
+
+  // ── Gmail-style draft helpers ─────────────────────────────────────────────
+
+  // Schedule a debounced PATCH on the active draft (700ms)
+  const patchDraftField = (payload) => {
+    if (!activeDraftId) return;
+    if (patchDebounceRef.current) clearTimeout(patchDebounceRef.current);
+    patchDebounceRef.current = setTimeout(() => {
+      updateDraft({ id: activeDraftId, payload }).catch(() => {});
+    }, 700);
+  };
+
+  // Click "New Shipment" → create empty draft immediately, then open dialog
+  const handleOpenNewShipment = async () => {
+    try {
+      const draft = await createEmptyDraft();
+      setActiveDraftId(draft.ID);
+      setDraftItems([]);
+      setPoItems([]);
+      setShipQtys({});
+      setNewForm({ purchaseOrderId: '', deliveryDate: todayISO(), deliveryAddress: '', notes: '', totalWeight: '' });
+      setDialogOpen(true);
+      queryClient.invalidateQueries(["shipments"]);
+    } catch (err) {
+      setActionMsg({ type: 'Negative', text: `Failed to create draft: ${err?.response?.data?.error?.message || err.message}` });
+    }
+  };
+
+  // Click "Edit" on existing draft → load data, open dialog
+  const handleEditDraft = (draft) => {
+    setActiveDraftId(draft.ID);
+    setDraftItems(draft.items || []);
+    setPoItems([]);
+    setShipQtys({});
+    setNewForm({
+      purchaseOrderId: draft.purchaseOrderId || '',
+      deliveryDate:    draft.deliveryDate || todayISO(),
+      deliveryAddress: draft.deliveryAddress || '',
+      notes:           draft.notes || '',
+      totalWeight:     draft.totalWeight != null ? String(draft.totalWeight) : '',
+    });
+    setDialogOpen(true);
+  };
+
+  // Close dialog without activating — draft stays in DB
+  const handleCloseDialog = () => {
+    if (patchDebounceRef.current) clearTimeout(patchDebounceRef.current);
+    setDialogOpen(false);
+    setActiveDraftId(null);
+    setDraftItems([]);
+    setPoItems([]);
+    setShipQtys({});
+    setNewForm({ purchaseOrderId: '', deliveryDate: todayISO(), deliveryAddress: '', notes: '', totalWeight: '' });
+    queryClient.invalidateQueries(["shipments"]);
   };
 
   const columns = [
@@ -359,13 +462,18 @@ export default function ShipmentWorkspace() {
     {
       Header: "Actions",
       id: "actions",
+      width: 240,
+      minWidth: 240,
       Cell: ({ row }) => {
         const isDraft = row.original.IsActiveEntity === false;
         const s = row.original;
         return (
-          <FlexBox style={{ gap: "0.5rem", flexWrap: "wrap" }}>
+          <FlexBox style={{ gap: "0.4rem", alignItems: "center" }}>
             {isDraft ? (
               <>
+                <Button design="Default" icon="edit" onClick={() => handleEditDraft(s)}>
+                  Edit
+                </Button>
                 <Button
                   design="Emphasized"
                   disabled={submitDraftMutation.isPending}
@@ -375,15 +483,15 @@ export default function ShipmentWorkspace() {
                 </Button>
                 <Button
                   design="Negative"
+                  icon="delete"
                   disabled={deleteDraftMutation.isPending}
-                  onClick={() => deleteDraftMutation.mutate(s.ID)}
-                >
-                  Delete
-                </Button>
+                  onClick={() => {
+                    if (window.confirm('Delete this draft?')) deleteDraftMutation.mutate(s.ID);
+                  }}
+                />
               </>
             ) : (
               <>
-                {/* Vendor: Flag Delay — chỉ khi chưa Delivered/Exception */}
                 {!isManager && (
                   <Button
                     design="Attention"
@@ -400,14 +508,14 @@ export default function ShipmentWorkspace() {
                     Flag Delay
                   </Button>
                 )}
+                <Button
+                  design="Transparent"
+                  onClick={() => setSelected(s)}
+                >
+                  Detail
+                </Button>
               </>
             )}
-            <Button
-              design="Transparent"
-              onClick={() => setSelected(s)}
-            >
-              Detail
-            </Button>
           </FlexBox>
         );
       },
@@ -434,7 +542,7 @@ export default function ShipmentWorkspace() {
             <Button
               design="Emphasized"
               icon="add"
-              onClick={() => setDialogOpen(true)}
+              onClick={handleOpenNewShipment}
             >
               New Shipment
             </Button>
@@ -531,6 +639,12 @@ export default function ShipmentWorkspace() {
               </div>
 
               {/* ── Shipment Items ── */}
+              {selected.items?.length === 0 && (
+                <div style={{ marginBottom: '0.75rem' }}>
+                  <strong style={{ display: 'block', marginBottom: '0.4rem' }}>📦 Items</strong>
+                  <div style={{ padding: '0.5rem', color: 'var(--sapContent_LabelColor)', fontSize: '0.82rem' }}>No items linked to this shipment.</div>
+                </div>
+              )}
               {selected.items?.length > 0 && (
                 <div style={{ marginBottom: '0.75rem' }}>
                   <strong style={{ display: 'block', marginBottom: '0.4rem' }}>📦 Items</strong>
@@ -560,7 +674,7 @@ export default function ShipmentWorkspace() {
                   </table>
                 </div>
               )}
-              {selected.status === "Exception" && isManager && (
+              {selected.status === "Exception" && isManager && selected.exceptionType === "VENDOR_DELAY" && (
                 <div style={{
                   marginTop: "1rem",
                   padding: "1rem",
@@ -704,15 +818,15 @@ export default function ShipmentWorkspace() {
               )}
 
               <div style={{ marginTop: "1rem" }}>
-                <strong>Upload Invoice PDF:</strong>
+                <strong>Upload Delivery Note PDF:</strong>
                 <br />
                 {selected.IsActiveEntity === false ? (
-                  <MessageStrip
-                    design="Warning"
-                    hideCloseButton
-                    style={{ marginTop: "0.5rem" }}
-                  >
-                    Submit the shipment first before uploading an invoice.
+                  <MessageStrip design="Warning" hideCloseButton style={{ marginTop: "0.5rem" }}>
+                    Submit the shipment first before uploading a delivery note.
+                  </MessageStrip>
+                ) : selected.status !== 'Shipped' ? (
+                  <MessageStrip design="Information" hideCloseButton style={{ marginTop: "0.5rem" }}>
+                    Delivery note upload is only available when shipment status is <strong>Shipped</strong>.
                   </MessageStrip>
                 ) : (
                   <input
@@ -724,26 +838,23 @@ export default function ShipmentWorkspace() {
                 )}
               </div>
               {ocrResult && (
-                <div
-                  style={{
-                    marginTop: "1rem",
-                    padding: "1rem",
-                    background: "var(--sapSuccessBackground)",
-                    borderRadius: 8,
-                  }}
-                >
-                  <div>
-                    🤖 <strong>AI/OCR Result:</strong>
+                <div style={{ marginTop: "1rem", padding: "1rem", background: "var(--sapSuccessBackground)", borderRadius: 8, border: "1px solid var(--sapSuccessBorderColor)" }}>
+                  <div style={{ fontWeight: 600, marginBottom: "0.5rem" }}>
+                    🤖 AI/OCR Result
+                    {ocrResult.confidence > 0 && ocrResult.confidence < 0.7 && (
+                      <span style={{ marginLeft: "0.5rem", color: "var(--sapWarningColor)", fontWeight: 400, fontSize: "0.85rem" }}>
+                        ⚠️ Low confidence ({(ocrResult.confidence * 100).toFixed(0)}%) — please verify
+                      </span>
+                    )}
                   </div>
-                  <div>
-                    Tracking: <strong>{ocrResult.trackingNumber}</strong>
-                  </div>
-                  <div>
-                    Batch ID: <strong>{ocrResult.batchId}</strong>
-                  </div>
-                  <div>
-                    Confidence:{" "}
-                    <strong>{(ocrResult.confidence * 100).toFixed(0)}%</strong>
+                  <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "0.25rem 1rem", fontSize: "0.875rem" }}>
+                    {ocrResult.trackingNumber && <><span style={{ color: "var(--sapContent_LabelColor)" }}>Tracking:</span><strong>{ocrResult.trackingNumber}</strong></>}
+                    {ocrResult.batchId && <><span style={{ color: "var(--sapContent_LabelColor)" }}>Batch ID:</span><strong>{ocrResult.batchId}</strong></>}
+                    {ocrResult.vendorName && <><span style={{ color: "var(--sapContent_LabelColor)" }}>Vendor:</span><strong>{ocrResult.vendorName}</strong></>}
+                    {ocrResult.totalAmount != null && <><span style={{ color: "var(--sapContent_LabelColor)" }}>Total:</span><strong>{Number(ocrResult.totalAmount).toLocaleString()}</strong></>}
+                    {!ocrResult.trackingNumber && !ocrResult.batchId && !ocrResult.vendorName && (
+                      <span style={{ gridColumn: "1/-1", color: "var(--sapContent_LabelColor)" }}>No data extracted — PDF may not contain readable text.</span>
+                    )}
                   </div>
                 </div>
               )}
@@ -817,27 +928,55 @@ export default function ShipmentWorkspace() {
 
       <Dialog
         open={dialogOpen}
-        headerText="Create New Shipment"
+        headerText={activeDraftId && (draftItems.length > 0 || newForm.purchaseOrderId) ? "Edit Draft Shipment" : "New Shipment"}
         style={{ '--_ui5-dialog-max-height': '90vh' }}
         footer={
           <Bar endContent={
-            <FlexBox style={{ gap: "0.5rem" }}>
-              <Button onClick={() => { setDialogOpen(false); setPoItems([]); setShipQtys({}); }}>Cancel</Button>
+            <FlexBox style={{ gap: "0.5rem", alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
               <Button
-                design="Emphasized"
-                disabled={createMutation.isPending}
-                onClick={handleCreateShipment}
+                design="Negative"
+                icon="delete"
+                disabled={deleteDraftMutation.isPending || !activeDraftId}
+                onClick={() => {
+                  if (activeDraftId && window.confirm('Delete this draft? This cannot be undone.')) {
+                    deleteDraftMutation.mutate(activeDraftId);
+                    handleCloseDialog();
+                  }
+                }}
               >
-                {createMutation.isPending ? "Saving..." : "Save as Draft"}
+                Delete Draft
               </Button>
+              <FlexBox style={{ gap: "0.5rem", alignItems: 'center' }}>
+                <span style={{ fontSize: '0.75rem', color: 'var(--sapContent_LabelColor)' }}>
+                  💾 Saved automatically
+                </span>
+                <Button onClick={handleCloseDialog}>Close</Button>
+                <Button
+                  design="Emphasized"
+                  disabled={submitDraftMutation.isPending || !activeDraftId}
+                  onClick={() => {
+                    if (!newForm.deliveryDate) {
+                      setActionMsg({ type: 'Negative', text: '❌ Please select a delivery date before submitting.' });
+                      return;
+                    }
+                    if (draftItems.length === 0 && poItems.length === 0) {
+                      setActionMsg({ type: 'Negative', text: '❌ Please select a Purchase Order with items before submitting.' });
+                      return;
+                    }
+                    activeDraftId && submitDraftMutation.mutate(activeDraftId);
+                  }}
+                >
+                  {submitDraftMutation.isPending ? "Submitting..." : "Submit Shipment"}
+                </Button>
+              </FlexBox>
             </FlexBox>
           } />
         }
-        onClose={() => { setDialogOpen(false); setPoItems([]); setShipQtys({}); }}
+        onClose={handleCloseDialog}
       >
         <div style={{ padding: "1rem", minWidth: 560, maxWidth: 680, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
 
-          {/* ── Step 1: Select PO ── */}
+          {/* ── Step 1: Select PO (always visible — re-selecting clears old items) ── */}
           <div>
             <Label style={{ fontWeight: 600, marginBottom: '0.4rem', display: 'block' }}>
               Purchase Order <span style={{ color: 'var(--sapErrorColor)' }}>*</span>
@@ -855,8 +994,49 @@ export default function ShipmentWorkspace() {
             </Select>
           </div>
 
-          {/* ── PO Items panel ── */}
-          {newForm.purchaseOrderId && (
+          {/* ── Existing items (when editing saved draft) ── */}
+          {draftItems.length > 0 && (
+            <div style={{ border: '1px solid var(--sapList_BorderColor)', borderRadius: 8, overflow: 'hidden' }}>
+              <div style={{ padding: '0.6rem 1rem', background: 'var(--sapList_HeaderBackground)', fontWeight: 600, fontSize: '0.85rem', borderBottom: '1px solid var(--sapList_BorderColor)' }}>
+                📦 Shipment Items ({draftItems.length})
+              </div>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                <thead>
+                  <tr style={{ background: 'var(--sapList_HeaderBackground)' }}>
+                    {['Material', 'Description', 'Ordered', 'Unit', 'Qty to Ship'].map(h => (
+                      <th key={h} style={{ padding: '0.4rem 0.6rem', textAlign: 'left', fontWeight: 600, color: 'var(--sapContent_LabelColor)', borderBottom: '1px solid var(--sapList_BorderColor)' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {draftItems.map((item, idx) => (
+                    <tr key={item.ID || idx} style={{ background: idx % 2 === 0 ? 'transparent' : 'var(--sapList_AlternatingRowBackground)' }}>
+                      <td style={{ padding: '0.4rem 0.6rem', fontWeight: 600 }}>{item.materialId || '—'}</td>
+                      <td style={{ padding: '0.4rem 0.6rem', color: 'var(--sapContent_LabelColor)' }}>{item.materialDesc || '—'}</td>
+                      <td style={{ padding: '0.4rem 0.6rem' }}>{item.orderedQuantity != null ? Math.round(item.orderedQuantity) : '—'}</td>
+                      <td style={{ padding: '0.4rem 0.6rem' }}>{item.unit || '—'}</td>
+                      <td style={{ padding: '0.4rem 0.6rem' }}>
+                        <input
+                          type="number" min="0" step="1"
+                          defaultValue={Math.round(item.quantity ?? 0)}
+                          style={{ width: 80, padding: '0.25rem 0.4rem', border: '1px solid var(--sapField_BorderColor)', borderRadius: 4, fontSize: '0.82rem' }}
+                          onChange={(e) => {
+                            const qty = parseInt(e.target.value) || 0;
+                            if (activeDraftId && item.ID) {
+                              updateDraftItem({ shipmentId: activeDraftId, itemId: item.ID, qty }).catch(() => {});
+                            }
+                          }}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* ── PO Items panel (new draft, PO selected, items being added) ── */}
+          {draftItems.length === 0 && newForm.purchaseOrderId && (
             <div style={{
               border: '1px solid var(--sapList_BorderColor)',
               borderRadius: 8,
@@ -893,7 +1073,7 @@ export default function ShipmentWorkspace() {
                       <tr key={item.purchaseOrderItem} style={{ background: idx % 2 === 0 ? 'transparent' : 'var(--sapList_AlternatingRowBackground)' }}>
                         <td style={{ padding: '0.4rem 0.6rem', fontWeight: 600 }}>{item.material || '—'}</td>
                         <td style={{ padding: '0.4rem 0.6rem', color: 'var(--sapContent_LabelColor)' }}>{item.materialDesc || '—'}</td>
-                        <td style={{ padding: '0.4rem 0.6rem' }}>{item.orderQuantity}</td>
+                        <td style={{ padding: '0.4rem 0.6rem' }}>{item.orderQuantity != null ? Math.round(item.orderQuantity) : '—'}</td>
                         <td style={{ padding: '0.4rem 0.6rem' }}>{item.unit}</td>
                         <td style={{ padding: '0.4rem 0.6rem' }}>
                           {item.netPriceAmount != null
@@ -904,9 +1084,9 @@ export default function ShipmentWorkspace() {
                           <input
                             type="number"
                             min="0"
-                            max={item.orderQuantity}
-                            step="0.001"
-                            value={shipQtys[item.purchaseOrderItem] ?? item.orderQuantity}
+                            max={Math.round(item.orderQuantity)}
+                            step="1"
+                            value={Math.round(shipQtys[item.purchaseOrderItem] ?? item.orderQuantity)}
                             onChange={(e) => setShipQtys(prev => ({ ...prev, [item.purchaseOrderItem]: e.target.value }))}
                             style={{
                               width: 80, padding: '0.25rem 0.4rem',
@@ -930,16 +1110,21 @@ export default function ShipmentWorkspace() {
                 Delivery Date <span style={{ color: 'var(--sapErrorColor)' }}>*</span>
               </Label>
               <DatePicker
+                key={activeDraftId || 'new'}
                 ref={deliveryDatePickerRef}
                 style={{ width: '100%' }}
-                value={new Date().toLocaleDateString('en-US')}
+                value={newForm.deliveryDate
+                  ? new Date(newForm.deliveryDate).toLocaleDateString('en-US')
+                  : new Date().toLocaleDateString('en-US')}
                 minDate={new Date().toLocaleDateString('en-US')}
                 onChange={(e) => {
                   const val = e.detail?.value || e.target?.value;
                   if (val) {
                     const parsed = new Date(val);
                     if (!isNaN(parsed.getTime())) {
-                      setNewForm(f => ({ ...f, deliveryDate: parsed.toISOString().split('T')[0] + 'T00:00:00Z' }));
+                      const iso = parsed.toISOString().split('T')[0] + 'T00:00:00Z';
+                      setNewForm(f => ({ ...f, deliveryDate: iso }));
+                      patchDraftField({ deliveryDate: iso });
                     }
                   }
                 }}
@@ -948,10 +1133,16 @@ export default function ShipmentWorkspace() {
             <div style={{ flex: 1 }}>
               <Label style={{ fontWeight: 600, marginBottom: '0.4rem', display: 'block' }}>Total Weight (kg)</Label>
               <Input
+                key={activeDraftId || 'new'}
                 type="Number"
                 placeholder="0.000"
+                value={newForm.totalWeight}
                 style={{ width: '100%' }}
-                onInput={(e) => setNewForm(f => ({ ...f, totalWeight: e.target.value }))}
+                onInput={(e) => {
+                  const val = e.target.value;
+                  setNewForm(f => ({ ...f, totalWeight: val }));
+                  patchDraftField({ totalWeight: parseFloat(val) || 0 });
+                }}
               />
             </div>
           </FlexBox>
@@ -959,18 +1150,30 @@ export default function ShipmentWorkspace() {
           <div>
             <Label style={{ fontWeight: 600, marginBottom: '0.4rem', display: 'block' }}>Delivery Address</Label>
             <Input
+              key={activeDraftId || 'new'}
               placeholder="Street, City, Country"
+              value={newForm.deliveryAddress}
               style={{ width: '100%' }}
-              onInput={(e) => setNewForm(f => ({ ...f, deliveryAddress: e.target.value }))}
+              onInput={(e) => {
+                const val = e.target.value;
+                setNewForm(f => ({ ...f, deliveryAddress: val }));
+                patchDraftField({ deliveryAddress: val });
+              }}
             />
           </div>
 
           <div>
             <Label style={{ fontWeight: 600, marginBottom: '0.4rem', display: 'block' }}>Notes</Label>
             <Input
+              key={activeDraftId || 'new'}
               placeholder="Carrier info, special instructions..."
+              value={newForm.notes}
               style={{ width: '100%' }}
-              onInput={(e) => setNewForm(f => ({ ...f, notes: e.target.value }))}
+              onInput={(e) => {
+                const val = e.target.value;
+                setNewForm(f => ({ ...f, notes: val }));
+                patchDraftField({ notes: val });
+              }}
             />
           </div>
         </div>

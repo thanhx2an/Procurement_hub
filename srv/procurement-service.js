@@ -1,4 +1,74 @@
-const cds = require('@sap/cds');
+const cds  = require('@sap/cds');
+const zlib = require('zlib');
+
+// ─── Helper: Extract plain text from PDF (ASCII85 + FlateDecode, no deps) ──
+function extractPdfText(buffer) {
+    try {
+        // Find all stream...endstream blocks
+        const results = [];
+        let pos = 0;
+        while (true) {
+            const start = buffer.indexOf(Buffer.from('stream'), pos);
+            if (start === -1) break;
+            let s = start + 6;
+            if (buffer[s] === 0x0D && buffer[s+1] === 0x0A) s += 2;
+            else if (buffer[s] === 0x0A) s += 1;
+            const end = buffer.indexOf(Buffer.from('endstream'), s);
+            if (end === -1) break;
+            const streamData = buffer.slice(s, end);
+            pos = end + 9;
+
+            // Detect filter from preceding bytes
+            const pre = buffer.slice(Math.max(0, start - 300), start).toString('latin1');
+            const hasAscii85 = pre.includes('ASCII85Decode');
+            const hasFlate   = pre.includes('FlateDecode');
+
+            let decoded = streamData;
+            if (hasAscii85) decoded = ascii85Decode(streamData);
+            if (hasFlate) {
+                try { decoded = zlib.inflateSync(decoded); } catch (_) {}
+            }
+
+            // Extract text from BT...ET blocks
+            const text = decoded.toString('latin1');
+            const btEtRe = /BT([\s\S]*?)ET/g;
+            let m;
+            while ((m = btEtRe.exec(text)) !== null) {
+                const tjRe = /\(([^)]+)\)\s*(?:Tj|TJ)/g;
+                let t;
+                while ((t = tjRe.exec(m[1])) !== null) {
+                    const s2 = t[1].replace(/\\n/g, '\n').replace(/\\\(/g, '(').replace(/\\\)/g, ')').trim();
+                    if (s2.length > 0) results.push(s2);
+                }
+            }
+        }
+        return results.join('\n');
+    } catch (e) {
+        return '';
+    }
+}
+
+function ascii85Decode(buf) {
+    const result = [];
+    let acc = 0, cnt = 0;
+    for (let i = 0; i < buf.length; i++) {
+        const c = buf[i];
+        if (c === 0x7E && buf[i+1] === 0x3E) break; // ~>
+        if (c === 0x7A) { result.push(0,0,0,0); continue; } // z
+        if (c < 0x21 || c > 0x75) continue;
+        acc = acc * 85 + (c - 33);
+        cnt++;
+        if (cnt === 5) {
+            result.push((acc >>> 24) & 0xFF, (acc >>> 16) & 0xFF, (acc >>> 8) & 0xFF, acc & 0xFF);
+            acc = 0; cnt = 0;
+        }
+    }
+    if (cnt > 0) {
+        for (let i = cnt; i < 5; i++) acc = acc * 85 + 84;
+        for (let i = 0; i < cnt - 1; i++) result.push((acc >>> (24 - i*8)) & 0xFF);
+    }
+    return Buffer.from(result);
+}
 
 // ─── Helper: BTP Alert Notification REST call ─────────────────────────────
 async function sendAlertNotification({ subject, body, shipmentId, eventType = 'CRITICALDELAY', severity = 'WARNING' }) {
@@ -194,12 +264,30 @@ module.exports = cds.service.impl(async function () {
     this.on('READ', 'Products', async (req) => {
         try {
             const S4 = await cds.connect.to('API_PRODUCT');
-            const { A_Product } = S4.entities;
-            return await S4.run(
-                SELECT.from(A_Product)
-                    .columns('Product', 'ProductType', 'BaseUnit', 'ProductGroup', 'ProductDescription')
-                    .limit(20)
-            ) ?? [];
+            const { A_Product, A_ProductDescription } = S4.entities;
+
+            // ProductDescription is in a separate language-dependent entity
+            const [products, descriptions] = await Promise.all([
+                S4.run(
+                    SELECT.from(A_Product)
+                        .columns('Product', 'ProductType', 'BaseUnit', 'ProductGroup')
+                        .limit(50)
+                ) ?? [],
+                S4.run(
+                    SELECT.from(A_ProductDescription)
+                        .columns('Product', 'ProductDescription')
+                        .where({ Language: 'EN' })
+                        .limit(50)
+                ) ?? [],
+            ]);
+
+            const descMap = {};
+            for (const d of descriptions) descMap[d.Product] = d.ProductDescription;
+
+            return products.map(p => ({
+                ...p,
+                ProductDescription: descMap[p.Product] || p.Product,
+            }));
         } catch (err) {
             console.error('[Products]', err.message);
             throw err;
@@ -211,16 +299,20 @@ module.exports = cds.service.impl(async function () {
         try {
             const S4_PO = await cds.connect.to('API_PURCHASEORDER');
             const { PurchaseOrder } = S4_PO.entities;
-            let query = SELECT.from(PurchaseOrder)
+            const user = req.user;
+
+            let headerQuery = SELECT.from(PurchaseOrder)
                 .columns('PurchaseOrder', 'PurchaseOrderType', 'Supplier', 'DocumentCurrency')
                 .limit(20);
-            const user = req.user;
             if (user.is('VendorUser') || user.is('VendorAdmin')) {
                 const vendorID = user.attr?.VendorID;
                 if (!vendorID) return req.error(403, 'No VendorID attribute assigned');
-                query = query.where({ Supplier: vendorID });
+                headerQuery = headerQuery.where({ Supplier: vendorID });
             }
-            return await S4_PO.run(query) ?? [];
+            const headers = await S4_PO.run(headerQuery) ?? [];
+            if (!headers.length) return [];
+
+            return headers;
         } catch (err) {
             console.error('[PurchaseOrders]', err.message);
             throw err;
@@ -281,7 +373,67 @@ module.exports = cds.service.impl(async function () {
             const storageUrl = `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${filePath}`;
             console.log('[UploadInvoice] Uploaded to:', storageUrl);
 
-            // 2. Record metadata vào AssetAttachments
+            // 2. AI/OCR: extract text từ PDF → gửi text lên AI (không cần multimodal)
+            let ocrResult = { trackingNumber: null, batchId: null, vendorName: null, totalAmount: null, confidence: 0, storageUrl };
+            try {
+                const GOOGLE_AI_KEY = process.env.GOOGLE_AI_KEY;
+                if (!GOOGLE_AI_KEY) throw new Error('GOOGLE_AI_KEY not set');
+
+                const pdfText = extractPdfText(pdfBuffer);
+                console.log('[UploadInvoice] Extracted PDF text:', pdfText.slice(0, 300));
+
+                if (!pdfText.trim()) throw new Error('PDF text extraction returned empty');
+
+                const aiRes = await fetch(
+                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GOOGLE_AI_KEY}`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{
+                                parts: [{
+                                    text: `You are a document parser. Extract structured data from this delivery note / invoice document and return ONLY valid JSON with these exact fields:
+{
+  "trackingNumber": "tracking/waybill/shipment number or null",
+  "batchId": "batch/lot number or null",
+  "vendorName": "vendor/supplier company name or null",
+  "totalAmount": 0.00,
+  "confidence": 0.0
+}
+
+The document may be in any language — always return field values in their original form (do not translate values).
+Return ONLY the JSON object, no explanation.
+
+Document text:
+${pdfText}`,
+                                }],
+                            }],
+                            generationConfig: { responseMimeType: 'application/json' },
+                        }),
+                    }
+                );
+
+                if (aiRes.ok) {
+                    const aiData = await aiRes.json();
+                    const parsed = JSON.parse(aiData.candidates?.[0]?.content?.parts?.[0]?.text || '{}');
+                    ocrResult = {
+                        trackingNumber: parsed.trackingNumber || null,
+                        batchId:        parsed.batchId        || null,
+                        vendorName:     parsed.vendorName     || null,
+                        totalAmount:    parsed.totalAmount != null ? Number(parsed.totalAmount) : null,
+                        confidence:     parsed.confidence     || 0.9,
+                        storageUrl,
+                    };
+                    console.log('[UploadInvoice] AI extracted:', JSON.stringify(ocrResult));
+                } else {
+                    const errText = await aiRes.text();
+                    console.warn('[UploadInvoice] Google AI error:', aiRes.status, errText);
+                }
+            } catch (ocrErr) {
+                console.warn('[UploadInvoice] OCR failed (non-fatal):', ocrErr.message);
+            }
+
+            // 3. Record metadata + AI results vào AssetAttachments
             await INSERT.into(AssetAttachments).entries({
                 shipment_ID: shipmentId,
                 fileName,
@@ -290,15 +442,17 @@ module.exports = cds.service.impl(async function () {
                 fileSize:    fileSize || pdfBuffer.length,
                 uploadedAt:  new Date().toISOString(),
                 uploadedBy:  req.user?.id || 'anonymous',
+                batchId:     ocrResult.batchId,
+                vendorName:  ocrResult.vendorName,
+                totalAmount: ocrResult.totalAmount,
+                aiConfidence: ocrResult.confidence,
             });
 
-            // 3. Mock AI/OCR
-            const ocrResult = {
-                trackingNumber: `TRK-${shipmentId?.substring(0, 8).toUpperCase()}`,
-                batchId:        `BATCH-${Date.now()}`,
-                confidence:     0.95,
-                storageUrl,
-            };
+            // 4. Lưu trackingNumber lên Shipments nếu AI extract được
+            if (ocrResult.trackingNumber) {
+                await UPDATE(Shipments).set({ trackingNumber: ocrResult.trackingNumber }).where({ ID: shipmentId });
+                console.log('[UploadInvoice] Saved trackingNumber to Shipment:', ocrResult.trackingNumber);
+            }
 
             await INSERT.into(AuditLogs).entries({
                 entityName: 'Shipments',
@@ -354,18 +508,39 @@ module.exports = cds.service.impl(async function () {
                 const now   = new Date().toISOString();
                 const openEnd = '9999-12-31T00:00:00Z';
 
-                const ledgerEntries = items
-                    .filter(i => i.negotiatedPrice > 0 && i.materialId)
-                    .map(i => ({
-                        vendorCode:      data.vendorCode,
-                        materialId:      i.materialId,
-                        materialDesc:    i.materialDesc || '',
+                // Fetch StandardPrice từ S/4HANA cho mỗi material
+                let S4_PROD;
+                try { S4_PROD = await cds.connect.to('API_PRODUCT'); } catch (_) {}
+
+                const filteredItems = items.filter(i => i.negotiatedPrice > 0 && i.materialId);
+
+                const ledgerEntries = await Promise.all(filteredItems.map(async (i) => {
+                    let basePrice = 0;
+                    if (S4_PROD) {
+                        try {
+                            const { A_ProductValuation } = S4_PROD.entities;
+                            const val = await S4_PROD.run(
+                                SELECT.one.from(A_ProductValuation)
+                                    .columns('StandardPrice', 'MovingAveragePrice')
+                                    .where({ Product: i.materialId })
+                            );
+                            basePrice = Number(val?.StandardPrice) || Number(val?.MovingAveragePrice) || 0;
+                            console.log(`[PriceLedger] S4 basePrice for ${i.materialId}:`, basePrice);
+                        } catch (e) {
+                            console.warn(`[PriceLedger] Could not fetch S4 price for ${i.materialId}:`, e.message);
+                        }
+                    }
+                    return {
+                        vendorCode:        data.vendorCode,
+                        materialId:        i.materialId,
+                        materialDesc:      i.materialDesc || '',
                         sourceShipment_ID: id,
-                        negotiatedPrice: i.negotiatedPrice,
-                        basePrice:       0,
-                        validFrom:       now,
-                        validTo:         openEnd,
-                    }));
+                        negotiatedPrice:   i.negotiatedPrice,
+                        basePrice,
+                        validFrom:         now,
+                        validTo:           openEnd,
+                    };
+                }));
 
                 if (ledgerEntries.length > 0) {
                     await INSERT.into(PriceLedger).entries(...ledgerEntries);
@@ -383,22 +558,69 @@ module.exports = cds.service.impl(async function () {
     // ─── AUTO-SET vendorCode khi Vendor tạo shipment ─────────────────────
     // CDS restrict: 'vendorCode = $user.VendorID' — nếu không set thì CREATE fail
     // XSUAA trả VendorID dạng array hoặc nested array — flatten hoàn toàn
-    this.before('CREATE', 'Shipments', (req) => {
+    // ─── AUTO-UPSERT local Products khi tạo ShipmentItem từ PO ──────────
+    // Mục đích: set product_ID để link về local Products entity
+    this.before('CREATE', 'ShipmentItems', async (req) => {
+        const { materialId, materialDesc, unit, negotiatedPrice } = req.data;
+        if (!materialId) return;
+
+        const { Products } = this.entities;
+        const db = await cds.connect.to('db');
+
+        // Tìm xem đã có local Product với extProductId này chưa
+        let product = await db.run(
+            SELECT.one.from(Products).where({ extProductId: materialId })
+        );
+
+        if (!product) {
+            // Chưa có → tạo mới
+            const newId = cds.utils.uuid();
+            await db.run(
+                INSERT.into(Products).entries({
+                    ID:           newId,
+                    extProductId: materialId,
+                    name:         materialDesc || materialId,
+                    unit:         unit || null,
+                    basePrice:    negotiatedPrice || null,
+                })
+            );
+            product = { ID: newId };
+            console.log('[ShipmentItems] Created local Product:', materialId, '→', newId);
+        }
+
+        req.data.product_ID = product.ID;
+    });
+
+    // ─── AUTO-SET vendorCode khi Vendor tạo hoặc patch draft ───────────────
+    // Cần thiết vì empty draft POST không có vendorCode trong payload
+    const setVendorCode = (req) => {
         const user = req.user;
         if (user.is('VendorUser') || user.is('VendorAdmin')) {
             const raw = user.attr?.VendorID;
-            // Flatten mọi dạng: '1000000', ['1000000'], [['1000000']]
             const vendorCode = [].concat(raw ?? []).flat(Infinity)[0];
-            req.data.vendorCode = vendorCode != null ? String(vendorCode) : undefined;
-            console.log('[CreateShipment] raw VendorID:', JSON.stringify(raw), '→ vendorCode:', req.data.vendorCode);
+            if (vendorCode != null) {
+                req.data.vendorCode = String(vendorCode);
+                console.log(`[${req.event} Shipment] vendorCode set:`, req.data.vendorCode);
+            }
         }
-    });
+    };
+    this.before('CREATE', 'Shipments', setVendorCode);
 
-    // ─── EARLY VALIDATION: Delivery date không được là quá khứ ───────────
+    // ─── VALIDATION khi activate draft (SAVE = draftActivate) ───────────────
+    // Note: không check items ở đây vì khi SAVE fires, items vẫn còn trong
+    // draft table — chưa copy sang main table. Frontend validate items trước khi gọi activate.
     this.before('SAVE', 'Shipments', async (req) => {
         const { deliveryDate } = req.data;
-        if (deliveryDate && new Date(deliveryDate) < new Date()) {
-            return req.reject(400, 'Delivery date must be in the future');
+
+        // 1. Require deliveryDate
+        if (!deliveryDate) {
+            return req.reject(400, 'Delivery date is required before submitting a shipment');
+        }
+        // 2. Delivery date không được là quá khứ
+        const delivery = new Date(deliveryDate); delivery.setHours(0,0,0,0);
+        const today    = new Date();              today.setHours(0,0,0,0);
+        if (delivery < today) {
+            return req.reject(400, 'Delivery date must be today or in the future');
         }
     });
 

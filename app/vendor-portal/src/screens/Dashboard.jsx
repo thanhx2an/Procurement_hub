@@ -210,15 +210,15 @@ export default function Dashboard() {
 
   const actionLabel = (s) => {
     if (isManager) {
-      if (s.status === 'Shipped') return { text: 'Confirm receipt', color: '#0f766e' };
-      if (s.status === 'Exception') return { text: 'Approve / Reject delay', color: '#aa0808' };
+      if (s.status === 'Shipped')    return { text: 'Awaiting receipt confirmation', badge: 'Confirm Received', color: '#0f766e' };
+      if (s.status === 'Exception')  return { text: 'Vendor reported a delay',       badge: 'Approve / Reject', color: '#aa0808' };
     }
     if (isVendor) {
-      if (s.status === 'Pending') return { text: 'Mark as Shipped', color: '#8b6f00' };
+      if (s.status === 'Pending')    return { text: 'Ready to ship?',                badge: 'Mark as Shipped', color: '#8b6f00' };
       if (s.status === 'Exception' && s.exceptionType === 'NOT_RECEIVED')
-        return { text: 'Manager: not received — Reconfirm or Flag Delay', color: '#aa0808' };
+        return { text: 'Manager flagged goods not received', badge: 'Reconfirm or Flag Delay', color: '#aa0808' };
     }
-    return { text: '', color: '#6e6e6e' };
+    return { text: '', badge: '', color: '#6e6e6e' };
   };
 
   const [poVisible, setPoVisible] = useState(5);
@@ -262,28 +262,53 @@ export default function Dashboard() {
         }>
           <div style={{ padding: '0.75rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
             {myActions.map(s => {
-              const { text, color } = actionLabel(s);
+              const { text, badge, color } = actionLabel(s);
               return (
                 <div key={s.ID} style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  padding: '0.6rem 0.75rem',
-                  border: `1px solid ${color}33`,
+                  padding: '0.75rem 1rem',
+                  border: `1px solid ${color}22`,
                   borderLeft: `4px solid ${color}`,
-                  borderRadius: 6,
-                  background: `${color}08`,
+                  borderRadius: 8,
+                  background: `${color}07`,
+                  gap: '1rem',
                 }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <span style={{ fontWeight: 600, fontSize: '0.875rem' }}>
-                      {s.shipmentNumber || s.ID?.substring(0, 8)}
-                      {s.vendorCode && <span style={{ color: 'var(--sapContent_LabelColor)', fontWeight: 400, marginLeft: 8 }}>· {s.vendorCode}</span>}
-                    </span>
-                    <span style={{ fontSize: '0.78rem', color }}>
-                      {text}
-                      {s.deliveryDate && ` · Due ${new Date(s.deliveryDate).toLocaleDateString()}`}
-                    </span>
+                  {/* Left: shipment info */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <span style={{ fontWeight: 700, fontSize: '0.9rem' }}>
+                        {s.shipmentNumber || s.ID?.substring(0, 8)}
+                      </span>
+                      {s.vendorCode && (
+                        <span style={{
+                          fontSize: '0.75rem', padding: '0.1rem 0.5rem',
+                          borderRadius: 999, background: 'var(--sapNeutralBackground)',
+                          color: 'var(--sapContent_LabelColor)',
+                        }}>
+                          {s.vendorCode}
+                        </span>
+                      )}
+                      {s.deliveryDate && (
+                        <span style={{ fontSize: '0.75rem', color: 'var(--sapContent_LabelColor)' }}>
+                          Due {new Date(s.deliveryDate).toLocaleDateString()}
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--sapContent_LabelColor)' }}>{text}</span>
+                      <span style={{
+                        fontSize: '0.75rem', fontWeight: 600,
+                        padding: '0.15rem 0.55rem', borderRadius: 999,
+                        background: `${color}18`, color,
+                      }}>
+                        {badge}
+                      </span>
+                    </div>
                   </div>
+                  {/* Right: Go button */}
                   <Button design="Transparent" icon="arrow-right"
                     onClick={() => navigate('/shipments')}
+                    style={{ flexShrink: 0 }}
                   >
                     Go
                   </Button>

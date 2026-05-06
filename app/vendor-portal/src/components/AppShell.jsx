@@ -36,7 +36,7 @@ export default function AppShell({ children }) {
         <ShellBarItem
           icon="log"
           text="Sign Out"
-          onClick={() => { window.location.href = '/logout'; }}
+          onClick={() => { window.location.href = '/do/logout'; }}
         />
       </ShellBar>
 

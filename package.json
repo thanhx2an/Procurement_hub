@@ -2,7 +2,6 @@
   "name": "baongoc-procurement-hub",
   "version": "1.0.0",
   "private": true,
-
   "dependencies": {
     "@cap-js/hana": "^2.7.1",
     "@sap-cloud-sdk/connectivity": "^4",
@@ -12,19 +11,15 @@
     "@sap/xssec": "^4.13.0",
     "express": "^4"
   },
-
   "devDependencies": {
     "@cap-js/sqlite": "^2"
   },
-
   "scripts": {
     "start": "cds-serve",
     "build": "cds build --production"
   },
-
   "cds": {
     "requires": {
-
       "API_BUSINESS_PARTNER": {
         "kind": "odata-v2",
         "model": "srv/external/API_BUSINESS_PARTNER",
@@ -33,7 +28,6 @@
           "path": "/sap/opu/odata/sap/API_BUSINESS_PARTNER"
         }
       },
-
       "API_PRODUCT": {
         "kind": "odata-v2",
         "model": "srv/external/API_PRODUCT",
@@ -42,7 +36,6 @@
           "path": "/sap/opu/odata/sap/API_PRODUCT_SRV"
         }
       },
-
       "API_SUPPLIERINVOICE": {
         "kind": "odata-v2",
         "model": "srv/external/API_SUPPLIERINVOICE",
@@ -51,7 +44,6 @@
           "path": "/sap/opu/odata/sap/API_SUPPLIERINVOICE_PROCESS_SRV"
         }
       },
-
       "API_PURCHASEORDER": {
         "kind": "odata",
         "model": "srv/external/API_PURCHASEORDER",
@@ -60,16 +52,13 @@
           "path": "/sap/opu/odata4/sap/api_purchaseorder_2/srvd_a2x/sap/purchaseorder/0001"
         }
       },
-
       "db": {
         "kind": "hana"
       },
-
       "auth": "xsuaa",
       "destinations": true,
       "connectivity": true
     },
-
     "build": {
       "target": "gen",
       "tasks": [
@@ -83,13 +72,11 @@
         }
       ]
     },
-
     "server": {
       "body-parser": {
         "limit": "20mb"
       }
     },
-
     "fiori": {
       "bypass_draft": true
     }
