@@ -53,7 +53,7 @@ export default function Contacts() {
 
 
   const openCreate = () => {
-    setForm({ ...EMPTY_FORM, vendorCode: isVendorAdmin ? (me?.id || '') : '' });
+    setForm({ ...EMPTY_FORM, vendorCode: isVendorAdmin ? (me?.vendorId || '') : '' });
     setEditTarget(null);
     setDialogOpen(true);
   };
