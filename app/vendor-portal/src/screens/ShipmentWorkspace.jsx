@@ -831,7 +831,7 @@ export default function ShipmentWorkspace() {
                 ) : (
                   <input
                     type="file"
-                    accept="application/pdf"
+                    accept="application/pdf,image/jpeg,image/png,image/webp"
                     style={{ marginTop: "0.5rem" }}
                     onChange={(e) => handleFileUpload(e, selected.ID)}
                   />

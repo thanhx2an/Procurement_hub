@@ -25,11 +25,12 @@ entity Shipments : cuid, managed {
     deliveryDate     : DateTime;
     totalWeight      : Decimal(13,3);
     purchaseOrderId       : String(10);
+    purchaseOrderItem     : String(5);   // PO line item number (e.g. '00010') — needed to PATCH S/4HANA schedule line
     deliveryAddress       : String(500);
     notes                 : String(1000);
     delayReason           : String(500);
     proposedDeliveryDate  : DateTime;
-    exceptionType         : String(20);  // 'VENDOR_DELAY' | 'NOT_RECEIVED'
+    exceptionType         : String enum { VENDOR_DELAY; NOT_RECEIVED };
     trackingNumber        : String(100); // Carrier tracking number (from AI/OCR on delivery note)
     items            : Composition of many ShipmentItems on items.parent = $self;
     attachments      : Composition of many AssetAttachments on attachments.shipment = $self;
@@ -62,7 +63,7 @@ entity ShipmentItems : cuid {
     product         : Association to Products;
     // Direct S/4HANA material reference (no dependency on CAP Products entity)
     materialId      : String(18);
-    materialDesc    : String(40);
+    materialDesc    : String(100);
     quantity        : Decimal(13,3);
     orderedQuantity : Decimal(13,3);
     unit            : String(10);
@@ -76,7 +77,7 @@ entity PriceLedger : cuid, temporal {
     vendorCode      : String(10);
     // S/4HANA material reference (auto-populated from ShipmentItems)
     materialId      : String(18);
-    materialDesc    : String(40);
+    materialDesc    : String(100);
     sourceShipment  : Association to Shipments;
     validFrom       : DateTime;
     validTo         : DateTime;

@@ -339,7 +339,7 @@ export default function PriceLedger() {
             color={avgDiscount > 0 ? 'var(--sapPositiveColor)' : 'var(--sapCriticalColor)'}
           />
           <MiniKpi
-            label="Total Savings"
+            label="Avg Unit Savings"
             value={totalSavings.toLocaleString(undefined, { minimumFractionDigits: 2 })}
             color={totalSavings > 0 ? 'var(--sapPositiveColor)' : undefined}
           />

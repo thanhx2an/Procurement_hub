@@ -24,8 +24,8 @@ service ProcurementService @(requires: 'authenticated-user') @(path: '/procureme
     @odata.draft.enabled
     @(restrict: [
         { grant: ['READ', 'WRITE'], to: 'ProcurementManager' },
-        { grant: ['READ', 'WRITE'], to: 'VendorUser',  where: 'vendorCode = $user.VendorID' },
-        { grant: ['READ', 'WRITE'], to: 'VendorAdmin', where: 'vendorCode = $user.VendorID' },
+        { grant: ['READ', 'CREATE', 'UPDATE'], to: 'VendorUser',  where: 'vendorCode = $user.VendorID' },
+        { grant: ['READ', 'CREATE', 'UPDATE'], to: 'VendorAdmin', where: 'vendorCode = $user.VendorID' },
         { grant: 'READ',            to: 'Auditor' }
     ])
     entity Shipments as projection on db.Shipments;
@@ -33,7 +33,7 @@ service ProcurementService @(requires: 'authenticated-user') @(path: '/procureme
     // ─── ShipmentItems ───
     @(restrict: [
         { grant: ['READ', 'WRITE'], to: 'ProcurementManager' },
-        { grant: ['READ', 'WRITE'], to: ['VendorUser', 'VendorAdmin'] },
+        { grant: ['READ', 'WRITE'], to: ['VendorUser', 'VendorAdmin'], where: 'parent.vendorCode = $user.VendorID' },
         { grant: 'READ',            to: 'Auditor' }
     ])
     entity ShipmentItems as projection on db.ShipmentItems;
@@ -41,7 +41,7 @@ service ProcurementService @(requires: 'authenticated-user') @(path: '/procureme
     // ─── AssetAttachments ───
     @(restrict: [
         { grant: ['READ', 'WRITE'], to: 'ProcurementManager' },
-        { grant: ['READ', 'WRITE'], to: ['VendorUser', 'VendorAdmin'] },
+        { grant: ['READ', 'WRITE'], to: ['VendorUser', 'VendorAdmin'], where: 'shipment.vendorCode = $user.VendorID' },
         { grant: 'READ',            to: 'Auditor' }
     ])
     entity AssetAttachments as projection on db.AssetAttachments;
@@ -49,7 +49,7 @@ service ProcurementService @(requires: 'authenticated-user') @(path: '/procureme
     // ─── PriceLedger ───
     @(restrict: [
         { grant: 'READ',            to: ['ProcurementManager', 'Auditor'] },
-        { grant: ['READ', 'WRITE'], to: ['VendorUser', 'VendorAdmin'] }
+        { grant: ['READ', 'WRITE'], to: ['VendorUser', 'VendorAdmin'], where: 'vendorCode = $user.VendorID' }
     ])
     entity PriceLedger as projection on db.PriceLedger;
 
@@ -87,8 +87,9 @@ service ProcurementService @(requires: 'authenticated-user') @(path: '/procureme
 
     // ─── Current user info ───
     function me() returns {
-        id    : String;
-        roles : array of String;
+        id       : String;
+        roles    : array of String;
+        vendorId : String;
     };
 
     // ─── Fetch PO line items from S/4HANA ───
@@ -139,7 +140,7 @@ service ProcurementService @(requires: 'authenticated-user') @(path: '/procureme
     action reconfirmDelivery(shipmentId: UUID) returns String;
 
     @(requires: ['VendorUser', 'VendorAdmin', 'ProcurementManager'])
-    action uploadInvoicePdf(shipmentId: UUID, content: LargeString, fileName: String, fileSize: Integer) returns {
+    action uploadInvoicePdf(shipmentId: UUID, content: LargeString, fileName: String, fileSize: Integer, mimeType: String) returns {
         trackingNumber : String;
         batchId        : String;
         confidence     : Decimal;
